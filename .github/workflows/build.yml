@@ -187,6 +187,17 @@ jobs:
                         f"- ZIP directory / 解压目录: {info['upstream']}/",
                         f"- Archive size / 压缩包大小: {info['size_bytes']} bytes",
                         f"- SHA-256: {info['archive_sha256']}", '']
+              preset = info.get('runtime_preset')
+              if preset:
+                  notes += [f"- Runtime preset / 运行预设: {preset['name']}",
+                            f"- Preset documentation / 参数来源: {preset['readme']}",
+                            'Use this package’s Launch.bat to apply the runtime switches. A bare EXE launch does not apply them.',
+                            '请使用本包 Launch.bat 应用运行时开关；直接启动 EXE 不会自动应用。',
+                            'Upstream reported 8-10 FPS in first rooms on i7-14700KF / RTX 4070 12GB / 32GB RAM. This package is not gameplay-benchmarked.',
+                            '作者测试机首个房间 8-10 帧，过场 5-8.5 帧；本包未做游戏帧率实测，不保证相同表现。',
+                            '~~~bat']
+                  notes += [f'set "{key}={value}"' for key, value in preset['environment'].items()]
+                  notes += ['~~~', '']
           notes += ['## Download and run / 下载使用', '',
                     'Download your chosen project ZIP from Assets. Extract the entire ZIP and run Launch.bat inside original-owner/original-repository/.',
                     '在 Assets 中下载所需项目的 ZIP，完整解压后运行“原作者/仓库名/Launch.bat”。',

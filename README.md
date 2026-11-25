@@ -57,6 +57,18 @@ Release assets remain until deleted; intermediate Actions transfer artifacts exp
 
 Releases 附件不会随中转构建产物的 7 天保留期失效，除非手动删除。GitHub 自动生成的“Source code”附件是本工作流仓库源码；**实际启动器源码在便携包内的 source.zip 中**。
 
+## fxceless/victory-fork performance preset / 性能预设
+
+The fxceless package's **Launch.bat** now enables the README run-253 switches used for its reported 8-10 FPS, plus the author's documented run-279 additions (2048 MiB card windows, 1280 MiB buffer budget with 64 KiB minimum, texture copy-back, shorter buffer hashes). It uses Series X mode, keeps shader optimization at 63 and wave64 off, and clears timing/debug instrumentation. These are **runtime environment variables**, not Rust compile flags; setting them only while compiling does not enable them when playing. The executable is still an unmodified **Release** build without the diagnostics feature. Start via Launch.bat to apply the preset; starting victory.exe alone does not.
+
+fxceless 包内的 **Launch.bat** 已开启 README 中用于实测 8-10 帧的 run 253 开关，并加入作者 Run 279 推荐项：2048 MiB 显存窗口、1280 MiB 缓冲预算（最小 64 KiB）、纹理回写与短哈希。使用 Series X 模式，着色器优化保持 63，wave64 关闭，并清除计时和调试变量。它们是**运行时环境变量**，不是 Rust 编译参数；只在编译时设置并不会影响实际游玩。程序仍是未修改上游源码的 **Release** 构建，不启用 diagnostics。请通过 Launch.bat 启动，单独运行 victory.exe 不会自动应用预设。
+
+Upstream reported **8-10 FPS in the first rooms and 5-8.5 in the opening cutscene** on Windows 11, i7-14700KF, RTX 4070 12GB and 32GB RAM. This is not a frame-rate guarantee or a gameplay test of our package. Card window/buffer budgets are additional partial VRAM budgets, not total requirements. See **PERFORMANCE.md** and **RUNTIME-PRESET.json** inside the package for every applied switch, the exact reference SHA and instructions. 
+
+上游实测为 Win11、i7-14700KF、RTX 4070 12GB、32GB 内存：**首个房间 8-10 帧，开场过场 5-8.5 帧**；不保证你的硬件达到该帧率，也不代表本包已经游戏实测。显存窗口与缓冲只代表部分预算，不是总显存要求。包内 **PERFORMANCE.md** 与 **RUNTIME-PRESET.json** 记录全部开关、参数来源的完整 SHA 及用法。
+
+Preset reference / 预设来源：[README](https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/README.md) · [diagnostics/README.md](https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/diagnostics/README.md). Packages always record their own compiled source SHA separately.
+
 ## Attribution / 致谢
 
 All launcher code belongs to its original authors and retains its upstream license. VIctory and its variants use GPL-3.0-or-later; XCL uses GPL-2.0-only. Microsoft runtime files carry separate notices. This repository builds upstream code without patching its runtime sources.

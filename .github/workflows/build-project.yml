@@ -137,6 +137,82 @@ jobs:
               Copy-Notices $dxc (Join-Path $root 'licenses/DXC')
               Copy-Notices $agility (Join-Path $root 'licenses/Agility')
           }
+          $runtimePreset = $null
+          $presetCommands = 'rem No project-specific runtime preset.'
+          if ($repo -ceq 'fxceless/victory-fork') {
+              $runtimeEnv = [ordered]@{
+                  VICTORY_LEVELS_ON_DEMAND = '1'
+                  VICTORY_ASYNC_SUBMIT = '1'
+                  VICTORY_QUEUE2 = '1'
+                  VICTORY_INDIRECT_WINDOW = '1'
+                  VICTORY_TEXTURE_NO_WAIT = '1'
+                  VICTORY_MERGE_GAP = '64'
+                  VICTORY_MERGE_RUNS = '4096'
+                  VICTORY_STAGING_POOL = '0'
+                  VICTORY_COPY_PLAIN = '1'
+                  VICTORY_JOIN_PARTS = '1'
+                  VICTORY_BACK_OWN_VIEW = '1'
+                  VICTORY_INDIRECT_GATHER = '1'
+                  VICTORY_CARD_REHASH_RUNS = '1'
+                  VICTORY_CARD_WINDOWS_MB = '2048'
+                  VICTORY_CARD_BUFFERS_MIN_KB = '64'
+                  VICTORY_CARD_BUFFERS_MB = '1280'
+                  VICTORY_TEXTURE_BACK = '1'
+                  VICTORY_CARD_HASH_LEN = '1'
+                  VICTORY_SHADER_OPT = '63'
+                  VICTORY_WAVE_WIDE = '0'
+              }
+              $clearEnv = @('VICTORY_GPU_TIMING', 'VICTORY_D3D12_DRED', 'VICTORY_D3D12_DEBUG', 'VICTORY_D3D12_GBV', 'VICTORY_D3D12_WARP', 'VICTORY_PROFILE', 'VICTORY_BACK_READS')
+              $runtimePreset = [ordered]@{
+                  name = 'fxceless-readme-run279'
+                  kind = 'runtime-environment'; compile_profile = 'release'
+                  basis = 'README run-253 measured switch set plus documented run-279 additions'
+                  reference_sha = '6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d'
+                  readme = 'https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/README.md'
+                  diagnostics_readme = 'https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/diagnostics/README.md'
+                  compiled_source_readme = "https://github.com/$repo/blob/$sha/README.md"
+                  environment = $runtimeEnv; clear_environment = $clearEnv
+                  extra_arguments = @('--console', 'series-x')
+                  reported_hardware = 'Windows 11; i7-14700KF; RTX 4070 12GB; 32GB RAM'
+                  reported_fps = '8-10 in first rooms with base switches; 5-8.5 in opening cutscene; upstream self-report'
+                  gameplay_tested = $false
+              }
+              $commands = @('rem fxceless README runtime performance preset; not compile-time Rust flags.')
+              $commands += @($runtimeEnv.GetEnumerator() | ForEach-Object { 'set "' + $_.Key + '=' + $_.Value + '"' })
+              $commands += @($clearEnv | ForEach-Object { 'set "' + $_ + '="' })
+              $commands += @('if /i "%~1"=="--print-runtime-preset" (', '  echo Runtime preset: fxceless-readme-run279', '  set VICTORY_', '  popd', '  exit /b 0', ')', 'echo Using fxceless README performance preset - Series X; FPS is hardware dependent.')
+              $presetCommands = $commands -join [Environment]::NewLine
+              [System.IO.File]::WriteAllText((Join-Path $root 'RUNTIME-PRESET.json'), ($runtimePreset | ConvertTo-Json -Depth 8), $utf8)
+              $performanceNotes = @(
+                  '# fxceless README performance preset / README 性能预设'
+                  ''
+                  'Use Launch.bat (or drag the game EXE onto it). Runtime switches are set before victory.exe starts.'
+                  '使用 Launch.bat，或将游戏主程序拖到它上面；脚本在启动 victory.exe 之前设置性能开关。'
+                  'These are runtime environment variables. Setting them only during cargo build does not enable them when playing.'
+                  '这些是运行时环境变量，仅在 cargo build 阶段设置不会使游玩时自动生效；直接启动 EXE 不会自动应用本预设。'
+                  'Compiled with cargo build --release --locked, without the diagnostics feature or timing instrumentation.'
+                  '使用 --release --locked 编译，不启用 diagnostics 特性或计时诊断开销。'
+                  ('Preset reference / 预设说明来源: ' + $runtimePreset.readme)
+                  ('Additional switches / 补充开关来源: ' + $runtimePreset.diagnostics_readme)
+                  ('Actual compiled source / 实际编译源码: https://github.com/' + $repo + '/commit/' + $sha)
+                  'The base switches are the README run-253 set behind the reported 8-10 FPS; run 279 adds the window/buffer budgets, texture copy-back and shorter buffer hashes.'
+                  '基础开关对应 README 中测得 8-10 帧的 run 253；另加入作者 run 279 推荐的显存窗口、缓冲预算、纹理回写和短哈希开关。'
+                  'Shader optimizations stay at 63 (not the 127 grouped-load experiment); wave64 remains off. Timing/debug environment variables are cleared for this launch.'
+                  '着色器优化保持 63，不启用会导致黑水的 127 实验；wave64 保持关闭，并清除计时和调试环境变量。'
+                  'Upstream measurements: Windows 11, i7-14700KF, RTX 4070 12GB, 32GB RAM; Series X. 8-10 FPS in the first rooms, 5-8.5 in the opening cutscene, not a guarantee for your hardware.'
+                  '作者测试机为 Win11、i7-14700KF、RTX 4070 12GB、32GB 内存，Series X 模式；首个房间约 8-10 帧、过场 5-8.5 帧，不保证你的机器达到相同帧率。'
+                  'Run-279 budgets include a 2048 MiB card-window budget and a 1280 MiB buffer budget. These are partial budgets, not total VRAM requirements.'
+                  'Run 279 包含 2048 MiB 显存窗口预算及 1280 MiB 缓冲预算；这些只是部分预算，不代表总显存需求。'
+                  'The upstream still reports missing shadow/indirect lighting and experimental stability. No gameplay or GPU benchmark was run for this package.'
+                  '上游仍有阴影、间接光缺失及实验性稳定性问题；本包未做游戏实测或 GPU 基准测试。'
+                  ''
+                  '## Applied environment / 实际环境变量'
+                  '~~~bat'
+              )
+              $performanceNotes += @($runtimeEnv.GetEnumerator() | ForEach-Object { 'set "' + $_.Key + '=' + $_.Value + '"' })
+              $performanceNotes += @('~~~', '', 'CLI: victory.exe run "<game.exe>" --execute --console series-x', 'Inspect without starting the game: Launch.bat --print-runtime-preset')
+              [System.IO.File]::WriteAllLines((Join-Path $root 'PERFORMANCE.md'), $performanceNotes, $utf8)
+          }
           $launcher = @'
           @echo off
           setlocal EnableExtensions DisableDelayedExpansion
@@ -147,6 +223,7 @@ jobs:
           set "XCL_DATA_ROOT=%~dp0data"
           set "VICTORY_CACHE_DIR=%~dp0cache"
           set "VICTORY_DATA_DIR=%~dp0data"
+          rem PROJECT_RUNTIME_PRESET
           if exist "%~dp0xcl.exe" (
               if "%~1"=="" (
                   start "" /wait "%~dp0xcl.exe"
@@ -174,6 +251,10 @@ jobs:
           popd
           exit /b %RESULT%
           '@
+          $launcher = $launcher.Replace('rem PROJECT_RUNTIME_PRESET', $presetCommands)
+          if ($null -ne $runtimePreset) {
+              $launcher = $launcher.Replace('victory.exe" run "%GAME%" --execute', 'victory.exe" run "%GAME%" --execute --console series-x')
+          }
           [System.IO.File]::WriteAllText((Join-Path $root 'Launch.bat'), (($launcher -replace '\r?\n', [Environment]::NewLine) + [Environment]::NewLine), [System.Text.Encoding]::ASCII)
           $instructions = @'
           Extract the entire archive before use. Do not run directly inside the ZIP.
@@ -208,6 +289,7 @@ jobs:
                   @{ url = 'https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip'; sha256 = 'ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1' }
                   @{ url = 'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/1.620.2/microsoft.direct3d.d3d12.1.620.2.nupkg'; sha256 = '70489669c2bbeaf318b62d72b0ac3e753d521387bfc848c9763791c4e920bfcc' }
               ) } else { @() })
+              runtime_preset = $runtimePreset
               gameplay_tested = $false
           }
           [System.IO.File]::WriteAllText((Join-Path $root 'BUILD-INFO.json'), ($info | ConvertTo-Json -Depth 8), $utf8)
@@ -227,6 +309,22 @@ jobs:
           }
           & (Join-Path $extracted $binaryName) --help
           if ($LASTEXITCODE -ne 0) { throw 'Extracted executable failed --help.' }
+          if ($null -ne $runtimePreset) {
+              Push-Location -LiteralPath $extracted
+              try {
+                  $presetOutput = & cmd.exe /d /c 'Launch.bat --print-runtime-preset' | Out-String
+                  if ($LASTEXITCODE -ne 0) { throw 'Runtime preset launcher check failed.' }
+              } finally { Pop-Location }
+              foreach ($entry in $runtimeEnv.GetEnumerator()) {
+                  if ($presetOutput -notmatch ('(?m)^' + [regex]::Escape($entry.Key + '=' + $entry.Value) + '\r?$')) { throw "Runtime switch missing: $($entry.Key)" }
+              }
+              foreach ($entry in $clearEnv) {
+                  if ($presetOutput -match ('(?m)^' + [regex]::Escape($entry) + '=')) { throw "Debug/timing variable was not cleared: $entry" }
+              }
+              $packedPreset = Get-Content -LiteralPath (Join-Path $extracted 'RUNTIME-PRESET.json') -Raw | ConvertFrom-Json
+              if ($packedPreset.name -cne $runtimePreset.name -or $packedPreset.reference_sha -cne $runtimePreset.reference_sha) { throw 'Packed runtime preset mismatch.' }
+              Write-Host "Verified runtime preset: $($runtimePreset.name); $($runtimeEnv.Count) variables; Series X"
+          }
           $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           [System.IO.File]::WriteAllText(($zip + '.sha256'), "$zipHash  $zipName", $utf8)
           $info.archive = $zipName
