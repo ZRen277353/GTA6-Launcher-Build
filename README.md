@@ -11,6 +11,7 @@ Workflow-only Windows x64 portable builds from the latest upstream sources. This
 | [fxceless/victory-fork](https://github.com/fxceless/victory-fork) | victory.exe | fxceless/victory-fork/ |
 | [Zettrox/ztrx](https://github.com/Zettrox/ztrx) | victory.exe | Zettrox/ztrx/ |
 | [uiliannn/VItoriaBr](https://github.com/uiliannn/VItoriaBr) | victory.exe | uiliannn/VItoriaBr/ |
+| [Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD) | victory.exe | Belobug/VIctory-Belobug-AMD/ |
 
 ## English
 
@@ -19,7 +20,7 @@ Workflow-only Windows x64 portable builds from the latest upstream sources. This
 1. Sign in to GitHub, click **Fork** at the top of this repository, and create a copy under your own account.
 2. Open **Actions** in your fork. If GitHub asks, enable workflows by clicking **I understand my workflows, go ahead and enable them**.
 3. Select **Build launchers / 编译启动器**, click **Run workflow**, select your default branch and choose **all** or one upstream project.
-4. Run the workflow. Each selected project resolves its upstream default branch at build time, records the complete commit SHA, and checks out that exact commit. You do not need to fork or synchronize the five upstream projects.
+4. Run the workflow. Each selected project resolves its upstream default branch at build time, records the complete commit SHA, and checks out that exact commit. You do not need to fork or synchronize the six upstream projects.
 5. Once a project's build and ZIP checks succeed, open **Releases** in **your fork** and download its Windows x64 ZIP. Each selected project gets a separate release. If one fails, the other projects can still publish.
 
 No personal access token or repository secret is needed. The built-in GITHUB_TOKEN reads upstream metadata and publishes to your fork. The build job has read-only contents permission; the separate publisher has contents: write. If your organization or account restricts Actions or write tokens, allow this workflow in its settings. Upstream updates do not trigger builds automatically: run it manually whenever you need a new build.
@@ -41,7 +42,7 @@ Release assets remain until deleted; intermediate Actions transfer artifacts exp
 1. 登录 GitHub，在本仓库页面点击 **Fork**，复制到自己的账号下。
 2. 打开自己仓库的 **Actions**。如果 GitHub 提示未启用工作流，点击确认启用。
 3. 选择 **Build launchers / 编译启动器**，点击 **Run workflow**，选择默认分支，并选择 **all（全部）** 或某个项目。
-4. 点击运行。每个项目会在构建时查询原仓库默认分支的最新提交，记录完整 SHA，再检出该提交编译。无需另外 Fork 或手动同步五个上游仓库。
+4. 点击运行。每个项目会在构建时查询原仓库默认分支的最新提交，记录完整 SHA，再检出该提交编译。无需另外 Fork 或手动同步六个上游仓库。
 5. 某个项目编译和压缩包验证成功后，在**你自己仓库的 Releases** 中下载其 Windows x64 ZIP。各项目独立发布 Release；单个项目失败不会阻止其他项目发布。
 
 无需填写个人密钥、PAT 或仓库 Secret，使用 GitHub 自带的 GITHUB_TOKEN。构建阶段仅有 contents: read；独立发布阶段拥有 contents: write。如组织或账号限制 Actions 或写权限，需在相应设置中允许该工作流。上游更新不会自动触发，想更新时手动运行即可。
