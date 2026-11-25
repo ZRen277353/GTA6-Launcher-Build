@@ -160,9 +160,8 @@ jobs:
                   VICTORY_TEXTURE_BACK = '1'
                   VICTORY_CARD_HASH_LEN = '1'
                   VICTORY_SHADER_OPT = '63'
-                  VICTORY_WAVE_WIDE = '0'
               }
-              $clearEnv = @('VICTORY_GPU_TIMING', 'VICTORY_D3D12_DRED', 'VICTORY_D3D12_DEBUG', 'VICTORY_D3D12_GBV', 'VICTORY_D3D12_WARP', 'VICTORY_PROFILE', 'VICTORY_BACK_READS')
+              $clearEnv = @('VICTORY_GPU_TIMING', 'VICTORY_D3D12_DRED', 'VICTORY_D3D12_DEBUG', 'VICTORY_D3D12_GBV', 'VICTORY_D3D12_WARP', 'VICTORY_PROFILE', 'VICTORY_BACK_READS', 'VICTORY_WAVE_WIDE')
               $runtimePreset = [ordered]@{
                   name = 'fxceless-readme-run279'
                   kind = 'runtime-environment'; compile_profile = 'release'
@@ -197,8 +196,8 @@ jobs:
                   ('Actual compiled source / 实际编译源码: https://github.com/' + $repo + '/commit/' + $sha)
                   'The base switches are the README run-253 set behind the reported 8-10 FPS; run 279 adds the window/buffer budgets, texture copy-back and shorter buffer hashes.'
                   '基础开关对应 README 中测得 8-10 帧的 run 253；另加入作者 run 279 推荐的显存窗口、缓冲预算、纹理回写和短哈希开关。'
-                  'Shader optimizations stay at 63 (not the 127 grouped-load experiment); wave64 remains off. Timing/debug environment variables are cleared for this launch.'
-                  '着色器优化保持 63，不启用会导致黑水的 127 实验；wave64 保持关闭，并清除计时和调试环境变量。'
+                  'Shader optimizations stay at 63 (not the 127 grouped-load experiment); wave64 uses upstream defaults. Timing/debug environment variables are cleared for this launch.'
+                  '着色器优化保持 63，不启用会导致黑水的 127 实验；wave64 保留上游默认设置，并清除计时和调试环境变量。'
                   'Upstream measurements: Windows 11, i7-14700KF, RTX 4070 12GB, 32GB RAM; Series X. 8-10 FPS in the first rooms, 5-8.5 in the opening cutscene, not a guarantee for your hardware.'
                   '作者测试机为 Win11、i7-14700KF、RTX 4070 12GB、32GB 内存，Series X 模式；首个房间约 8-10 帧、过场 5-8.5 帧，不保证你的机器达到相同帧率。'
                   'Run-279 budgets include a 2048 MiB card-window budget and a 1280 MiB buffer budget. These are partial budgets, not total VRAM requirements.'
