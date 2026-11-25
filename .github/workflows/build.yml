@@ -106,7 +106,8 @@ jobs:
           run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/{run_id}"
           root = Path('artifacts')
           expected_ids = {name.replace('/', '-') for name in selected}
-          if {path.name for path in root.iterdir()} != expected_ids:
+          flat_single = len(selected) == 1 and (root / 'metadata.json').is_file()
+          if not flat_single and {path.name for path in root.iterdir()} != expected_ids:
               raise ValueError('Missing or unexpected project artifacts; no partial release allowed')
           out = Path('release')
           out.mkdir(exist_ok=False)
@@ -115,7 +116,7 @@ jobs:
           checksums = []
           for upstream in selected:
               ident = upstream.replace('/', '-')
-              folder = root / ident
+              folder = root if flat_single else root / ident
               info = json.loads((folder / 'metadata.json').read_text(encoding='utf-8-sig'))
               sha = info.get('source_sha', '')
               if info.get('upstream') != upstream or not re.fullmatch('[0-9a-f]{40}', sha):
@@ -125,6 +126,9 @@ jobs:
               archive = f'{ident}-windows-x64-{sha[:12]}.zip'
               if info.get('archive') != archive:
                   raise ValueError(f'Invalid archive name: {upstream}')
+              expected_files = {archive, archive + '.sha256', 'metadata.json', 'RELEASE-NOTES.md'}
+              if {path.name for path in folder.iterdir()} != expected_files:
+                  raise ValueError(f'Missing or unexpected files in artifact: {upstream}')
               zipped = folder / archive
               digest = sha256(zipped)
               if digest != info.get('archive_sha256') or zipped.stat().st_size != info.get('size_bytes'):
