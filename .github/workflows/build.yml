@@ -210,7 +210,10 @@ jobs:
           gh('release', 'create', tag, '--repo', repo, '--target', os.environ['GITHUB_SHA'],
              '--title', title, '--notes-file', str(notes_file), '--draft')
           gh('release', 'upload', tag, *map(str, assets), '--repo', repo)
-          remote = json.loads(gh('api', f'repos/{repo}/releases/tags/{tag}'))
+          remote_releases = json.loads(gh('api', f'repos/{repo}/releases?per_page=100'))
+          remote = next((release for release in remote_releases if release['tag_name'] == tag), None)
+          if remote is None or not remote['draft']:
+              raise ValueError('Uploaded draft release not found')
           remote_assets = {asset['name']: asset for asset in remote['assets']}
           if set(remote_assets) != {path.name for path in assets}:
               raise ValueError('Draft release asset list mismatch')
