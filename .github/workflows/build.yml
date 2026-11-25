@@ -14,6 +14,7 @@ on:
           - xcl-dev/xcl
           - fxceless/victory-fork
           - Zettrox/ztrx
+          - uiliannn/VItoriaBr
 
 permissions:
   contents: read
@@ -31,7 +32,7 @@ jobs:
         shell: python
         run: |
           import json, os
-          projects = ['Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx']
+          projects = ['Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr']
           selected = os.environ['PROJECT']
           if selected != 'all' and selected not in projects:
               raise SystemExit('Unsupported upstream repository')
