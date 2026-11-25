@@ -21,7 +21,7 @@ Workflow-only Windows x64 portable builds from the latest upstream sources. This
 2. Open **Actions** in your fork. If GitHub asks, enable workflows by clicking **I understand my workflows, go ahead and enable them**.
 3. Select **Build launchers / 编译启动器**, click **Run workflow**, select your default branch and choose **all** or one upstream project.
 4. Run the workflow. Each selected project resolves its upstream default branch at build time, records the complete commit SHA, and checks out that exact commit. You do not need to fork or synchronize the six upstream projects.
-5. Once a project's build and ZIP checks succeed, open **Releases** in **your fork** and download its Windows x64 ZIP. Each selected project gets a separate release. If one fails, the other projects can still publish.
+5. Wait until **all selected projects** compile and pass ZIP checks. The workflow then publishes **one combined Release per run**, containing a separate Windows x64 ZIP for each selected project. Open **Releases** in **your fork** to download the ZIP you want. If any selected project fails, **no Release is published**; fix the failure and rerun the failed jobs.
 
 No personal access token or repository secret is needed. The built-in GITHUB_TOKEN reads upstream metadata and publishes to your fork. The build job has read-only contents permission; the separate publisher has contents: write. If your organization or account restricts Actions or write tokens, allow this workflow in its settings. Upstream updates do not trigger builds automatically: run it manually whenever you need a new build.
 
@@ -31,7 +31,7 @@ Extract the entire ZIP into a writable folder. Open **Launch.bat** inside **orig
 
 Packages contain the original executable, launcher, upstream README and license notices, the exact source.zip, BUILD-INFO.json and SHA256SUMS.txt. XCL additionally bundles checksum-verified official DXC and D3D12 Agility runtimes with their separate license notices. Windows Gaming Services / XGameRuntime must already be installed for XCL. Rust and the full Windows SDK are not needed to use the binaries.
 
-Each release lists the **original repository URL, complete source Git commit, source branch, commit date, Git client version, Rust version, build run, and archive SHA-256**. The build checks release compilation, CLI --help and extracted file hashes. It does **not** establish gameplay, rendering correctness or performance. Supported Windows updates, GPU features/drivers and your own unpacked games are still required. Read each original project's requirements. No decryption, game downloading or game data is provided.
+Each release title includes the **compile completion time in Beijing time (UTC+08:00)**. The notes show the batch compile window and each project’s own compile completion time, together with the **original repository URL, complete source Git commit, source branch, commit date, Git client version, Rust version, build run, and archive SHA-256**. Each Release includes BUILD-MANIFEST.json and SHA256SUMS.txt, plus uniquely named per-project metadata and checksum files. All assets are uploaded and checked in a draft before the single Release becomes public. The build checks release compilation, CLI --help and extracted file hashes. It does **not** establish gameplay, rendering correctness or performance. Supported Windows updates, GPU features/drivers and your own unpacked games are still required. Read each original project's requirements. No decryption, game downloading or game data is provided.
 
 Release assets remain until deleted; intermediate Actions transfer artifacts expire after 7 days. GitHub's automatically generated “Source code” links refer to this workflow repository: the exact launcher sources are in **source.zip inside the portable package**.
 
@@ -43,7 +43,7 @@ Release assets remain until deleted; intermediate Actions transfer artifacts exp
 2. 打开自己仓库的 **Actions**。如果 GitHub 提示未启用工作流，点击确认启用。
 3. 选择 **Build launchers / 编译启动器**，点击 **Run workflow**，选择默认分支，并选择 **all（全部）** 或某个项目。
 4. 点击运行。每个项目会在构建时查询原仓库默认分支的最新提交，记录完整 SHA，再检出该提交编译。无需另外 Fork 或手动同步六个上游仓库。
-5. 某个项目编译和压缩包验证成功后，在**你自己仓库的 Releases** 中下载其 Windows x64 ZIP。各项目独立发布 Release；单个项目失败不会阻止其他项目发布。
+5. 等待**所有所选项目**编译成功并通过 ZIP 校验。每次运行**只统一发布一个 Release**，其中分别附上各项目的 Windows x64 ZIP。在**你自己仓库的 Releases** 下载所需项目。任一所选项目失败则**不发布 Release**，修复后可重新运行失败的任务。
 
 无需填写个人密钥、PAT 或仓库 Secret，使用 GitHub 自带的 GITHUB_TOKEN。构建阶段仅有 contents: read；独立发布阶段拥有 contents: write。如组织或账号限制 Actions 或写权限，需在相应设置中允许该工作流。上游更新不会自动触发，想更新时手动运行即可。
 
@@ -53,7 +53,7 @@ Release assets remain until deleted; intermediate Actions transfer artifacts exp
 
 压缩包包含原程序、启动器、上游说明与许可证、对应源码 source.zip、BUILD-INFO.json 和 SHA256SUMS.txt。XCL 额外附带经过校验的微软官方 DXC、D3D12 Agility 运行库及各自许可证，但 Gaming Services / XGameRuntime 仍需系统安装。使用这些程序不需要 Rust 或完整 Windows SDK。
 
-每个 Release 都标明**原仓库地址、编译源码完整 Git SHA、分支、提交时间、Git 工具版本、Rust 版本、构建记录和压缩包 SHA-256**。工作流验证 Release 编译、命令行帮助及解压文件校验，**不代表游戏已可玩，也不验证画面正确性或帧率**。仍需符合上游的 Windows 更新、显卡功能和驱动要求，并自行准备已解包的游戏文件。
+每个 Release 的标题直接标明**编译完成时间（北京时间 UTC+08:00）**，正文显示本批次编译起止时间以及每个项目各自的编译完成时间，并标明**原仓库地址、编译源码完整 Git SHA、分支、源码提交时间、Git 工具版本、Rust 版本、构建记录和压缩包 SHA-256**。同时提供统一的 BUILD-MANIFEST.json、SHA256SUMS.txt，以及名称不冲突的各项目 metadata 和校验文件。所有附件先上传并校验，最后才将这一个 Release 从草稿转为正式发布。工作流验证 Release 编译、命令行帮助及解压文件校验，**不代表游戏已可玩，也不验证画面正确性或帧率**。仍需符合上游的 Windows 更新、显卡功能和驱动要求，并自行准备已解包的游戏文件。
 
 Releases 附件不会随中转构建产物的 7 天保留期失效，除非手动删除。GitHub 自动生成的“Source code”附件是本工作流仓库源码；**实际启动器源码在便携包内的 source.zip 中**。
 

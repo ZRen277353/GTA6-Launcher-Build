@@ -1,4 +1,4 @@
-name: Build and release one upstream
+name: Build and package one upstream
 
 on:
   workflow_call:
@@ -56,6 +56,7 @@ jobs:
           fetch-depth: 1
 
       - name: Install upstream Rust toolchain and compile release
+        id: compile
         run: |
           $ErrorActionPreference = 'Stop'
           if (Test-Path -LiteralPath 'rust-toolchain.toml') {
@@ -69,13 +70,18 @@ jobs:
           rustc --version --verbose
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $package = if ($env:UPSTREAM -eq 'xcl-dev/xcl') { 'xcl' } else { 'victory' }
+          $compileStarted = [DateTime]::UtcNow.ToString('o')
           cargo build --release --locked --package $package --bin $package --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "started_utc=$compileStarted" >> $env:GITHUB_OUTPUT
+          "completed_utc=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_OUTPUT
 
       - name: Package owner/repository portable archive and verify extraction
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           SOURCE_BRANCH: ${{ steps.source.outputs.branch }}
+          COMPILE_STARTED_UTC: ${{ steps.compile.outputs.started_utc }}
+          COMPILED_UTC: ${{ steps.compile.outputs.completed_utc }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
@@ -192,6 +198,8 @@ jobs:
               source_branch = $env:SOURCE_BRANCH; source_commit_date = $commitDate
               source_url = "https://github.com/$repo/commit/$sha"; workflow = $buildUrl
               git_version = $gitVersion; rust_version = $rustVersion
+              compiled_started_utc = $env:COMPILE_STARTED_UTC; compiled_utc = $env:COMPILED_UTC
+              compiled_beijing = [DateTimeOffset]::Parse($env:COMPILED_UTC).ToOffset([TimeSpan]::FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss 'UTC+08:00'")
               built_utc = [DateTime]::UtcNow.ToString('o'); binary = $binaryName; binary_sha256 = $binaryHash
               profile = 'release'; target = 'x86_64-pc-windows-msvc'; crt = 'static'
               dxc = $(if ($isXcl) { 'v1.9.2609' } else { $null })
@@ -224,13 +232,14 @@ jobs:
           $info.archive = $zipName
           $info.archive_sha256 = $zipHash
           $info.size_bytes = (Get-Item -LiteralPath $zip).Length
-          $info.tag = "$id-$($sha.Substring(0, 12))-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           [System.IO.File]::WriteAllText((Join-Path $dist 'metadata.json'), ($info | ConvertTo-Json -Depth 8), $utf8)
           $notes = @(
               "## $repo - Windows x64 portable build / 便携构建"
               "- Original repository / 原仓库: https://github.com/$repo"
               "- Git commit / 编译源码完整 SHA: $sha"
               "- Source / 源码: https://github.com/$repo/commit/$sha"
+              "- Compile completed / 编译完成时间: $($info.compiled_beijing)"
+              "- Compile completed UTC: $($info.compiled_utc)"
               "- Branch / 分支: $env:SOURCE_BRANCH"
               "- Commit date / 提交时间: $commitDate"
               "- Git client / Git 工具版本: $gitVersion"
@@ -261,41 +270,4 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 7
-
-  publish:
-    name: Publish GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Download verified build files
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: ${{ needs.build.outputs.artifact }}
-          path: dist
-
-      - name: Publish release with original URL and exact source SHA
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          EXPECTED_UPSTREAM: ${{ inputs.upstream }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $info = Get-Content -LiteralPath dist/metadata.json -Raw | ConvertFrom-Json
-          if ($info.upstream -cne $env:EXPECTED_UPSTREAM -or $info.source_sha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid build provenance.' }
-          $id = $env:EXPECTED_UPSTREAM.Replace('/', '-')
-          $expectedArchive = "$id-windows-x64-$($info.source_sha.Substring(0, 12)).zip"
-          if ($info.archive -cne $expectedArchive) { throw 'Invalid archive name.' }
-          $zip = Join-Path dist $expectedArchive
-          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $info.archive_sha256) { throw 'Publication checksum mismatch.' }
-          $tag = "$id-$($info.source_sha.Substring(0, 12))-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $title = "$env:EXPECTED_UPSTREAM | $($info.source_sha.Substring(0, 12)) | Windows x64"
-          $url = & gh release create $tag $zip ($zip + '.sha256') dist/metadata.json --repo $env:GH_REPO --target $env:GITHUB_SHA --title $title --notes-file dist/RELEASE-NOTES.md
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "### $title" >> $env:GITHUB_STEP_SUMMARY
-          "Release: $url" >> $env:GITHUB_STEP_SUMMARY
-          "Original repository: https://github.com/$env:EXPECTED_UPSTREAM" >> $env:GITHUB_STEP_SUMMARY
-          "Source Git SHA: $($info.source_sha)" >> $env:GITHUB_STEP_SUMMARY
+          overwrite: true

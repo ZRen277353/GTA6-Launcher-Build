@@ -48,7 +48,179 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     permissions:
-      contents: write
+      contents: read
     uses: ./.github/workflows/build-project.yml
     with:
       upstream: ${{ matrix.upstream }}
+
+  publish:
+    name: Publish one combined Release / 统一发布
+    needs: [select, project]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download all selected verified packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Validate every project and publish one timestamped Release
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_MATRIX: ${{ needs.select.outputs.matrix }}
+        run: |
+          import datetime as dt
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+          import subprocess
+          
+          utc = dt.timezone.utc
+          beijing = dt.timezone(dt.timedelta(hours=8))
+          def stamp(value):
+              result = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
+              if result.tzinfo is None:
+                  raise ValueError('Compile time must include a timezone')
+              return result
+          def show(value):
+              return value.astimezone(beijing).strftime('%Y-%m-%d %H:%M:%S UTC+08:00')
+          def sha256(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream, 'sha256').hexdigest()
+          def gh(*args):
+              return subprocess.run(['gh', *args], check=True, capture_output=True, text=True).stdout.strip()
+          
+          selected = [entry['upstream'] for entry in json.loads(os.environ['EXPECTED_MATRIX'])['include']]
+          if not selected or len(selected) != len(set(selected)):
+              raise ValueError('Invalid project selection')
+          repo = os.environ['GH_REPO']
+          run_id = os.environ['GITHUB_RUN_ID']
+          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/{run_id}"
+          root = Path('artifacts')
+          expected_ids = {name.replace('/', '-') for name in selected}
+          if {path.name for path in root.iterdir()} != expected_ids:
+              raise ValueError('Missing or unexpected project artifacts; no partial release allowed')
+          out = Path('release')
+          out.mkdir(exist_ok=False)
+          infos = []
+          assets = []
+          checksums = []
+          for upstream in selected:
+              ident = upstream.replace('/', '-')
+              folder = root / ident
+              info = json.loads((folder / 'metadata.json').read_text(encoding='utf-8-sig'))
+              sha = info.get('source_sha', '')
+              if info.get('upstream') != upstream or not re.fullmatch('[0-9a-f]{40}', sha):
+                  raise ValueError(f'Invalid provenance: {upstream}')
+              if info.get('upstream_url') != f'https://github.com/{upstream}' or info.get('workflow') != run_url:
+                  raise ValueError(f'Wrong source URL or workflow: {upstream}')
+              archive = f'{ident}-windows-x64-{sha[:12]}.zip'
+              if info.get('archive') != archive:
+                  raise ValueError(f'Invalid archive name: {upstream}')
+              zipped = folder / archive
+              digest = sha256(zipped)
+              if digest != info.get('archive_sha256') or zipped.stat().st_size != info.get('size_bytes'):
+                  raise ValueError(f'Archive checksum or size mismatch: {upstream}')
+              checksum_text = (folder / (archive + '.sha256')).read_text(encoding='utf-8-sig').strip()
+              if checksum_text != f'{digest}  {archive}':
+                  raise ValueError(f'Invalid checksum file: {upstream}')
+              started = stamp(info['compiled_started_utc'])
+              completed = stamp(info['compiled_utc'])
+              if started > completed or completed > dt.datetime.now(utc) + dt.timedelta(minutes=5):
+                  raise ValueError(f'Invalid compile interval: {upstream}')
+              info['compiled_beijing'] = show(completed)
+              for name in (archive, archive + '.sha256'):
+                  target = out / name
+                  shutil.copyfile(folder / name, target)
+                  assets.append(target)
+              metadata = out / f'{ident}-metadata.json'
+              metadata.write_text(json.dumps(info, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+              assets.append(metadata)
+              checksums.append(f'{digest}  {archive}')
+              infos.append(info)
+          
+          started = min(stamp(info['compiled_started_utc']) for info in infos)
+          completed = max(stamp(info['compiled_utc']) for info in infos)
+          published = dt.datetime.now(utc)
+          tag = f"build-{completed.astimezone(beijing).strftime('%Y%m%d-%H%M%S')}-{run_id}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          title = f'启动器编译 / Launcher builds | {show(completed)} | {len(infos)} projects'
+          manifest = {'compile_started_utc': started.isoformat(), 'compile_completed_utc': completed.isoformat(),
+                      'compile_completed_beijing': show(completed), 'published_utc': published.isoformat(),
+                      'workflow': run_url, 'workflow_commit': os.environ['GITHUB_SHA'], 'projects': infos}
+          manifest_file = out / 'BUILD-MANIFEST.json'
+          manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          checksum_file = out / 'SHA256SUMS.txt'
+          checksum_file.write_text('\n'.join(checksums) + '\n', encoding='utf-8')
+          assets.extend([manifest_file, checksum_file])
+          notes = ['# Unified Windows x64 build / 统一构建', '',
+                   f'- **Compile completed / 编译完成时间（北京时间）: {show(completed)}**',
+                   f'- Compile started / 本批最早编译开始: {show(started)}',
+                   f'- Release assembled / 发布准备时间: {show(published)}',
+                   f'- Build / 构建记录: {run_url}',
+                   f'- Projects / 项目数: {len(infos)}', '',
+                   'All selected projects compiled and passed package checks before this single release was published.',
+                   '所有所选项目均编译成功并通过打包校验后，才统一发布此 Release；任一项目失败则不发布。', '',
+                   '| Original repository / 原仓库 | Full source Git SHA / 完整源码版本 | Compile completed / 编译完成（UTC+08:00） | ZIP |',
+                   '| --- | --- | --- | --- |']
+          for info in infos:
+              upstream = info['upstream']
+              sha = info['source_sha']
+              notes.append(f"| [{upstream}]({info['upstream_url']}) | [{sha}](https://github.com/{upstream}/commit/{sha}) | {info['compiled_beijing']} | {info['archive']} |")
+          notes += ['', '## Provenance / 构建详情', '']
+          for info in infos:
+              notes += [f"### {info['upstream']}",
+                        f"- Original repository / 原仓库: {info['upstream_url']}",
+                        f"- Source Git SHA / 编译源码完整 SHA: {info['source_sha']}",
+                        f"- Branch / 分支: {info['source_branch']}",
+                        f"- Source commit date / 源码提交时间: {info['source_commit_date']}",
+                        f"- Compile started / 编译开始: {show(stamp(info['compiled_started_utc']))}",
+                        f"- Compile completed / 编译完成: {info['compiled_beijing']}",
+                        f"- Git: {info['git_version']}", f"- Rust: {info['rust_version']}",
+                        f"- ZIP directory / 解压目录: {info['upstream']}/",
+                        f"- Archive size / 压缩包大小: {info['size_bytes']} bytes",
+                        f"- SHA-256: {info['archive_sha256']}", '']
+          notes += ['## Download and run / 下载使用', '',
+                    'Download your chosen project ZIP from Assets. Extract the entire ZIP and run Launch.bat inside original-owner/original-repository/.',
+                    '在 Assets 中下载所需项目的 ZIP，完整解压后运行“原作者/仓库名/Launch.bat”。',
+                    'Each package includes its executable, launcher, exact source.zip, license notices and checksums.',
+                    '每个压缩包包含程序、启动脚本、对应源码 source.zip、许可证和校验信息。',
+                    'XCL bundles DXC/Agility runtimes; Windows Gaming Services must still be installed separately.',
+                    'XCL 附带 DXC/Agility 运行库，但仍需系统安装 Gaming Services。',
+                    'No game files are included. Compile, CLI and archive checks do not verify gameplay or GPU rendering.',
+                    '不含游戏文件；仅验证编译、命令行及压缩包完整性，未验证实际游戏或 GPU 渲染。',
+                    'Automatic Source code assets are for this workflow repository; launcher sources are inside each package.',
+                    'GitHub 自动附加的 Source code 属于工作流仓库；实际启动器源码位于各压缩包内。']
+          notes_file = out / 'RELEASE-NOTES.md'
+          notes_file.write_text('\n'.join(notes) + '\n', encoding='utf-8')
+          # Keep the release private as a draft until every verified asset has uploaded.
+          existing = json.loads(gh('api', f'repos/{repo}/releases?per_page=100'))
+          matching = next((release for release in existing if release['tag_name'] == tag), None)
+          if matching:
+              if not matching['draft']:
+                  raise ValueError('This run already has a published release')
+              gh('release', 'delete', tag, '--repo', repo, '--yes')
+          gh('release', 'create', tag, '--repo', repo, '--target', os.environ['GITHUB_SHA'],
+             '--title', title, '--notes-file', str(notes_file), '--draft')
+          gh('release', 'upload', tag, *map(str, assets), '--repo', repo)
+          remote = json.loads(gh('api', f'repos/{repo}/releases/tags/{tag}'))
+          remote_assets = {asset['name']: asset for asset in remote['assets']}
+          if set(remote_assets) != {path.name for path in assets}:
+              raise ValueError('Draft release asset list mismatch')
+          for path in assets:
+              remote_asset = remote_assets[path.name]
+              if remote_asset['size'] != path.stat().st_size or remote_asset.get('digest') != 'sha256:' + sha256(path):
+                  raise ValueError(f'Uploaded asset verification failed: {path.name}')
+          gh('release', 'edit', tag, '--repo', repo, '--draft=false', '--latest')
+          url = gh('release', 'view', tag, '--repo', repo, '--json', 'url', '--jq', '.url')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(f'## {title}\n\n{url}\n\n')
+              summary.write('\n'.join(notes) + '\n')
+          print(json.dumps({'release': url, 'projects': len(infos), 'assets': len(assets), 'compile_completed_beijing': show(completed)}, ensure_ascii=False))
