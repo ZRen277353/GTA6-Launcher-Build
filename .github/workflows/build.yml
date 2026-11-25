@@ -1,0 +1,52 @@
+name: Build launchers / 编译启动器
+run-name: "Build ${{ inputs.project }} / 上游最新代码"
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Project to build / 选择项目 (all = 全部)
+        type: choice
+        default: all
+        options:
+          - all
+          - Marvisak/VIctory
+          - xcl-dev/xcl
+          - fxceless/victory-fork
+          - Zettrox/ztrx
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Select upstream projects
+        id: select
+        env:
+          PROJECT: ${{ inputs.project }}
+        shell: python
+        run: |
+          import json, os
+          projects = ['Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx']
+          selected = os.environ['PROJECT']
+          if selected != 'all' and selected not in projects:
+              raise SystemExit('Unsupported upstream repository')
+          matrix = {'include': [{'upstream': p} for p in projects if selected == 'all' or p == selected]}
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('matrix=' + json.dumps(matrix) + '\n')
+
+  project:
+    name: ${{ matrix.upstream }}
+    needs: select
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-project.yml
+    with:
+      upstream: ${{ matrix.upstream }}
