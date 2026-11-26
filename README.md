@@ -1,76 +1,96 @@
 # GTA6启动器编译 / GTA6 Launcher Builds
 
-Workflow-only Windows x64 portable builds from the latest upstream sources. This independent repository contains only this README and GitHub Actions workflow files: no launcher source code, game files, keys or console SDK components are committed here. This is an unofficial build service, not an official PC game release.
+[Run a build / 运行编译](../../actions/workflows/build.yml) · [Releases / 下载](../../releases) · [PortWatch VI](https://portwatch-vi.xyz/)
 
-本仓库仅用于从最新上游源码编译 Windows x64 便携包，是独立仓库，仅包含 README 和 GitHub Actions 工作流，不存放启动器源码、游戏文件、密钥或主机 SDK。本项目提供非官方构建，并非游戏官方 PC 版本。
+A workflow-only repository for building the latest public upstream Windows x64 launchers. It contains **only this README and two GitHub Actions workflows**: no launcher implementation, game files, console SDKs or keys. Upstream runtime sources are not patched.
 
-| Original project / 原项目 | Executable / 程序 | ZIP directory / 解压目录 |
-| --- | --- | --- |
-| [Marvisak/VIctory](https://github.com/Marvisak/VIctory) | victory.exe | Marvisak/VIctory/ |
-| [xcl-dev/xcl](https://github.com/xcl-dev/xcl) | xcl.exe | xcl-dev/xcl/ |
-| [fxceless/victory-fork](https://github.com/fxceless/victory-fork) | victory.exe | fxceless/victory-fork/ |
-| [Zettrox/ztrx](https://github.com/Zettrox/ztrx) | victory.exe | Zettrox/ztrx/ |
-| [uiliannn/VItoriaBr](https://github.com/uiliannn/VItoriaBr) | victory.exe | uiliannn/VItoriaBr/ |
-| [Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD) | victory.exe | Belobug/VIctory-Belobug-AMD/ |
+本项目只有 **README 和两个工作流文件**，用于从上游最新公开源码编译 Windows x64 启动器。不存放启动器实现、游戏文件、主机 SDK 或密钥，也不修改上游运行时代码。
 
-## English
+## Projects / 编译列表
 
-### Fork and build it yourself
+| Upstream / 原仓库 | Notes / 说明 |
+| --- | --- |
+| [avatarmanz/VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX) | Added from PortWatch's public race; uses the exact source's official fast launch preset. AMD tuning; 64 GB RAM recommended upstream. / 新增榜单项目，提取官方性能启动预设，主要针对AMD。 |
+| [DexNom/VIctory](https://github.com/DexNom/VIctory) | Added from PortWatch's public race; verifies format tables, builds all three executables. Default BAT uses the README no-RT path. / 新增榜单项目，含三个程序及格式表校验，默认关闭光追。 |
+| [Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD) | AMD-oriented fork / 面向AMD的分支 |
+| [uiliannn/VItoriaBr](https://github.com/uiliannn/VItoriaBr) | VIctory variant / VIctory分支 |
+| [fxceless/victory-fork](https://github.com/fxceless/victory-fork) | Documented run-279 runtime settings plus the measured run-293 lookup cache / 已测性能预设及查找缓存 |
+| [Marvisak/VIctory](https://github.com/Marvisak/VIctory) | Original VIctory / 原项目 |
+| [xcl-dev/xcl](https://github.com/xcl-dev/xcl) | XCL, with checksum-verified DXC and Agility runtime files / 附校验过的微软运行库 |
+| [Zettrox/ztrx](https://github.com/Zettrox/ztrx) | Kept in the selector; HTTP 404 is reported explicitly, without preventing other builds / 保留选项，404会明确记录并跳过 |
 
-1. Sign in to GitHub, click **Fork** at the top of this repository, and create a copy under your own account.
-2. Open **Actions** in your fork. If GitHub asks, enable workflows by clicking **I understand my workflows, go ahead and enable them**.
-3. Select **Build launchers / 编译启动器**, click **Run workflow**, select your default branch and choose **all** or one upstream project.
-4. Run the workflow. Each selected project resolves its upstream default branch at build time, records the complete commit SHA, and checks out that exact commit. You do not need to fork or synchronize the six upstream projects.
-5. Wait until **all selected projects** compile and pass ZIP checks. The workflow then publishes **one combined Release per run**, containing a separate Windows x64 ZIP for each selected project. Open **Releases** in **your fork** to download the ZIP you want. If any selected project fails, **no Release is published**; fix the failure and rerun the failed jobs.
+The public, active main-race repositories in the PortWatch data checked on **2026-11-26** are covered. Private builds and projects without downloadable public code cannot be compiled here. The list is deliberately reviewed rather than executing arbitrary repositories added by a website; future additions require updating both workflow allowlists.
 
-No personal access token or repository secret is needed. The built-in GITHUB_TOKEN reads upstream metadata and publishes to your fork. The build job has read-only contents permission; the separate publisher has contents: write. If your organization or account restricts Actions or write tokens, allow this workflow in its settings. Upstream updates do not trigger builds automatically: run it manually whenever you need a new build.
+已覆盖 **2026年11月26日** 检查时 PortWatch 主榜中可用的公开代码项目。私有版本和未开放源码的版本无法编译。名单经过审核，网站未来出现新项目时需更新两个工作流中的允许列表。
 
-### Download and run
+## Fork and build / Fork后自行编译
 
-Extract the entire ZIP into a writable folder. Open **Launch.bat** inside **original-owner/original-repository/**, or drag your game's EXE onto it. VIctory variants prompt for the full game EXE path; XCL opens its own chooser. Saves and caches are kept beside the launcher in data/ and cache/.
+1. **Fork this repository** into your own GitHub account. / 点击本仓库右上角 **Fork**，复制到自己的账号。
+2. Open **Actions** in your Fork and enable workflows if prompted. / 在Fork中进入 **Actions**，如有提示则启用工作流。
+3. Choose **Build launchers / 编译启动器**, then **Run workflow**. / 选择编译工作流，点击 **Run workflow**。
+4. Select **all** for one combined batch, or a single upstream. Choose the CPU target, then start. / 选择全部或单个项目，选择CPU指令集后开始。
+5. Wait for the selected builds and the final **Publish one combined Release / 统一发布** job. Open **Releases** in your own Fork and download the desired ZIP. / 等待编译和统一发布完成，到自己Fork的 **Releases** 下载所需ZIP。
 
-Packages contain the original executable, launcher, upstream README and license notices, the exact source.zip, BUILD-INFO.json and SHA256SUMS.txt. XCL additionally bundles checksum-verified official DXC and D3D12 Agility runtimes with their separate license notices. Windows Gaming Services / XGameRuntime must already be installed for XCL. Rust and the full Windows SDK are not needed to use the binaries.
+The upstream default-branch HEAD is resolved at build time and checked out by its exact full SHA. The upstream Rust toolchain and Cargo.lock are respected. Upstream changes do not trigger automatic builds: manually run again whenever you want an update.
 
-Each release title includes the **compile completion time in Beijing time (UTC+08:00)**. The notes show the batch compile window and each project’s own compile completion time, together with the **original repository URL, complete source Git commit, source branch, commit date, Git client version, Rust version, build run, and archive SHA-256**. Each Release includes BUILD-MANIFEST.json and SHA256SUMS.txt, plus uniquely named per-project metadata and checksum files. All assets are uploaded and checked in a draft before the single Release becomes public. The build checks release compilation, CLI --help and extracted file hashes. It does **not** establish gameplay, rendering correctness or performance. Supported Windows updates, GPU features/drivers and your own unpacked games are still required. Read each original project's requirements. No decryption, game downloading or game data is provided.
+每个项目在构建时解析上游默认分支HEAD，并按完整SHA精确检出，使用上游指定的Rust工具链及Cargo.lock。想更新时再次手动触发即可，上游更新不会自动消耗编译额度。
 
-Release assets remain until deleted; intermediate Actions transfer artifacts expire after 7 days. GitHub's automatically generated “Source code” links refer to this workflow repository: the exact launcher sources are in **source.zip inside the portable package**.
+Build jobs have `contents: read`; only the final publisher has `contents: write`. Account or organization Actions policies must permit these workflows. No personal token or additional secret is required in a normal Fork.
 
-## 中文
+编译任务只有读取仓库权限，统一发布任务才有写入Release权限。普通Fork无需添加个人令牌或额外Secret；账号或组织需允许Actions及工作流写权限。
 
-### Fork 后自己编译
+## Compiler optimization / 编译优化
 
-1. 登录 GitHub，在本仓库页面点击 **Fork**，复制到自己的账号下。
-2. 打开自己仓库的 **Actions**。如果 GitHub 提示未启用工作流，点击确认启用。
-3. 选择 **Build launchers / 编译启动器**，点击 **Run workflow**，选择默认分支，并选择 **all（全部）** 或某个项目。
-4. 点击运行。每个项目会在构建时查询原仓库默认分支的最新提交，记录完整 SHA，再检出该提交编译。无需另外 Fork 或手动同步六个上游仓库。
-5. 等待**所有所选项目**编译成功并通过 ZIP 校验。每次运行**只统一发布一个 Release**，其中分别附上各项目的 Windows x64 ZIP。在**你自己仓库的 Releases** 下载所需项目。任一所选项目失败则**不发布 Release**，修复后可重新运行失败的任务。
+Every successful package uses **Release, opt-level=3, fat LTO, codegen-units=1, static MSVC CRT**, with incremental compilation and the diagnostics feature disabled. Line-table debug information is retained for crash analysis. The actual Rust version, flags and profile are saved in `BUILD-INFO.json`, project metadata and the unified manifest.
 
-无需填写个人密钥、PAT 或仓库 Secret，使用 GitHub 自带的 GITHUB_TOKEN。构建阶段仅有 contents: read；独立发布阶段拥有 contents: write。如组织或账号限制 Actions 或写权限，需在相应设置中允许该工作流。上游更新不会自动触发，想更新时手动运行即可。
+所有项目使用 **Release、最高常规优化等级3、fat LTO、单代码生成单元和静态CRT**，关闭增量编译和diagnostics特性，保留便于定位崩溃的行号调试信息。实际参数和Rust版本记录在构建信息及清单中。
 
-### 解压使用
+- **x86-64-v3 (default):** optimized for modern CPUs with AVX2, FMA, BMI/BMI2 and related v3 instructions. / 默认适合支持这些指令的现代Intel/AMD处理器。
+- **x86-64:** the CPU compatibility option for older machines. / 旧CPU使用兼容选项。
 
-将 ZIP **完整解压**到可写目录，在**原作者/仓库名/**目录内双击 **Launch.bat**，也可以把游戏主程序拖到 BAT 上。VIctory 系列会提示输入游戏 EXE 完整路径；XCL 打开自带的选择窗口。存档和缓存放在启动器旁的 data/、cache/ 中。
+The build never uses `target-cpu=native` on a GitHub runner: that would target the runner's CPU rather than yours. Compiler optimization cannot guarantee better FPS in every scene or fix unimplemented rendering, GPU synchronization bugs or upstream crashes. These packages are not gameplay-benchmarked and do **not** promise stable 30 FPS.
 
-压缩包包含原程序、启动器、上游说明与许可证、对应源码 source.zip、BUILD-INFO.json 和 SHA256SUMS.txt。XCL 额外附带经过校验的微软官方 DXC、D3D12 Agility 运行库及各自许可证，但 Gaming Services / XGameRuntime 仍需系统安装。使用这些程序不需要 Rust 或完整 Windows SDK。
+不会把GitHub编译机的CPU当作你的CPU使用。编译优化不保证每个场景都更快，也无法自动修复未实现的渲染、GPU同步问题或全部崩溃；本项目不承诺稳定30帧。
 
-每个 Release 的标题直接标明**编译完成时间（北京时间 UTC+08:00）**，正文显示本批次编译起止时间以及每个项目各自的编译完成时间，并标明**原仓库地址、编译源码完整 Git SHA、分支、源码提交时间、Git 工具版本、Rust 版本、构建记录和压缩包 SHA-256**。同时提供统一的 BUILD-MANIFEST.json、SHA256SUMS.txt，以及名称不冲突的各项目 metadata 和校验文件。所有附件先上传并校验，最后才将这一个 Release 从草稿转为正式发布。工作流验证 Release 编译、命令行帮助及解压文件校验，**不代表游戏已可玩，也不验证画面正确性或帧率**。仍需符合上游的 Windows 更新、显卡功能和驱动要求，并自行准备已解包的游戏文件。
+## One Release, 404 fallback and version comparison / 统一发布、404兜底和版本对比
 
-Releases 附件不会随中转构建产物的 7 天保留期失效，除非手动删除。GitHub 自动生成的“Source code”附件是本工作流仓库源码；**实际启动器源码在便携包内的 source.zip 中**。
+**One workflow run produces one Release after all selected projects have a verified result.** Successful projects provide ZIPs; an upstream repository/commit HTTP 404 provides an explicit **“project 404, cannot download source, cannot compile”** record. A 404 project does not block other projects and never reuses an older binary. Other failures, including compiler errors, rate limits, permissions and broken dependency downloads, still fail the batch and prevent publication.
 
-## fxceless/victory-fork performance preset / 性能预设
+**每次运行只统一发布一个Release。** 所有选择项目都有确定结果后才发布：成功项目提供ZIP，上游仓库或提交404则写明 **“项目404，无法下载源码，无法编译”**，不会阻塞其他项目，也不会混入旧程序。真实编译错误、权限、限流和依赖下载错误仍使整批失败，不会被当成404隐藏。
 
-The fxceless package's **Launch.bat** now enables the README run-253 switches used for its reported 8-10 FPS, plus the author's documented run-279 additions (2048 MiB card windows, 1280 MiB buffer budget with 64 KiB minimum, texture copy-back, shorter buffer hashes). It uses Series X mode, keeps shader optimization at 63 and wave64 at upstream defaults, and clears timing/debug instrumentation. These are **runtime environment variables**, not Rust compile flags; setting them only while compiling does not enable them when playing. The executable is still an unmodified **Release** build without the diagnostics feature. Start via Launch.bat to apply the preset; starting victory.exe alone does not.
+Even if every selected project is 404, one status-only Release is published, with no executable and no invented compile time. Interrupted builds or missing/corrupt artifacts never count as 404.
 
-fxceless 包内的 **Launch.bat** 已开启 README 中用于实测 8-10 帧的 run 253 开关，并加入作者 Run 279 推荐项：2048 MiB 显存窗口、1280 MiB 缓冲预算（最小 64 KiB）、纹理回写与短哈希。使用 Series X 模式，着色器优化保持 63，wave64 保留上游默认设置，并清除计时和调试变量。它们是**运行时环境变量**，不是 Rust 编译参数；只在编译时设置并不会影响实际游玩。程序仍是未修改上游源码的 **Release** 构建，不启用 diagnostics。请通过 Launch.bat 启动，单独运行 victory.exe 不会自动应用预设。
+全部项目均404时发布一个仅含状态的Release，不附EXE，不伪造编译完成时间。中断任务或缺失、损坏的产物不会冒充404。
 
-Upstream reported **8-10 FPS in the first rooms and 5-8.5 in the opening cutscene** on Windows 11, i7-14700KF, RTX 4070 12GB and 32GB RAM. This is not a frame-rate guarantee or a gameplay test of our package. Card window/buffer budgets are additional partial VRAM budgets, not total requirements. See **PERFORMANCE.md** and **RUNTIME-PRESET.json** inside the package for every applied switch, the exact reference SHA and instructions. 
+The Release title shows the compile completion time in **Beijing time (UTC+08:00)**. The source-version table shows each original repository, **this run's 12-character Git SHA**, the **last published all-project batch's 12-character SHA**, changed/unchanged/new/404 status, and compile time. Commit links and comparisons open the exact full SHAs. A more recent single-project release is not mistaken for the previous all-project batch. Legacy multi-project manifests are recognized.
 
-上游实测为 Win11、i7-14700KF、RTX 4070 12GB、32GB 内存：**首个房间 8-10 帧，开场过场 5-8.5 帧**；不保证你的硬件达到该帧率，也不代表本包已经游戏实测。显存窗口与缓冲只代表部分预算，不是总显存要求。包内 **PERFORMANCE.md** 与 **RUNTIME-PRESET.json** 记录全部开关、参数来源的完整 SHA 及用法。
+Release标题显示 **北京时间UTC+08:00的编译完成时间**。表格对比原仓库、本次Git短版本、上次全项目统一构建的Git短版本、变化状态及编译时间。页面仅显示 **12位** 提交号，点击可查看完整提交或差异；较新的单项目构建不会覆盖上次全项目构建基准，旧版多项目清单也能识别。
 
-Preset reference / 预设来源：[README](https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/README.md) · [diagnostics/README.md](https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/diagnostics/README.md). Packages always record their own compiled source SHA separately.
+Full SHAs remain in `BUILD-MANIFEST.json` and uniquely named per-project metadata, including unavailable status and previous version. Packages, checksums and metadata are uploaded to one draft Release, verified against remote asset sizes and SHA-256 digests, and then published together. Workflow runs are serialized to keep the previous-batch comparison unambiguous.
+
+完整SHA及404状态保存在统一清单和各项目metadata中。附件全部上传到同一个草稿Release，核对远端大小和SHA-256后一次性公开。工作流串行发布，便于确定上次构建基准。
+
+## Extract and run / 解压使用
+
+Extract the entire ZIP into a writable folder. Its layout is **original-owner/original-repository/**. Run **Launch.bat** inside that folder or drag the game's EXE onto it. VIctory asks for the game executable; XCL opens its own game picker. Saves and caches use `data/` and `cache/` beside the launcher.
+
+完整解压到可写目录，在 **原作者/仓库名/** 内运行 **Launch.bat**，或将游戏主程序拖到BAT。存档和缓存位于启动器旁的 `data/`、`cache/` 中。
+
+Packages include the executable, BAT, upstream README/license notices, exact `source.zip`, `BUILD-INFO.json` and file checksums. Projects with runtime presets also include `PERFORMANCE.md` and `RUNTIME-PRESET.json`; `Launch.bat --print-runtime-preset` prints the applied settings without starting the game. Runtime variables take effect when launching, not merely while compiling.
+
+包内含EXE、BAT、原项目说明和许可证、对应源码及校验文件。有预设的包另附参数说明和JSON；`Launch.bat --print-runtime-preset` 可检查参数而不启动游戏。运行参数需在启动游戏前设置，仅在编译时设置不会自动生效。
+
+- **fxceless:** retains the documented run-279 settings, shader opt 63 and upstream wave defaults; adds **`VICTORY_LOOKUP_CACHE=1`**, which upstream run 293 measured at about 14 ms/frame saved at equal draws. Unmeasured experiments are not enabled indiscriminately.
+- **AvatarManz:** extracts the official `scripts/play.ps1` default fast settings from the exact compiled SHA, including threaded recording, joined submissions and upload-ahead. AMD-focused, upstream recommends 64 GB RAM; NVIDIA performance is not established. Optional ray tracing stays off. The original script is included as a reference and is not the portable entry point.
+- **DexNom:** bundles **victory.exe, victory-play.exe and victory-warm.exe** and initializes checksum-pinned format tables before building. The BAT uses the README no-RT path, which is also upstream's suggested NVIDIA starting point. Select optional ray tracing/FSR explicitly with victory-play.exe.
+- **XCL:** bundles checksum-pinned official DXC/Agility files and their licenses; **Windows Gaming Services / XGameRuntime must still be installed**.
+
+No Rust or full Windows SDK is required to use the packages. You still need the upstream-supported Windows/GPU/driver features and your own unpacked game files. Releases persist independently of the seven-day intermediate Actions artifacts. GitHub's automatic “Source code” downloads are this workflow repository; **the actual launcher source is the `source.zip` inside each successful package**.
+
+运行包无需Rust或完整Windows SDK，但仍需满足上游系统和显卡要求，并自行提供已解包游戏文件。Release附件独立于7天保留期的中转产物。GitHub自动附加的Source code是本工作流仓库；**实际启动器源码在各包的source.zip里**。
 
 ## Attribution / 致谢
 
-All launcher code belongs to its original authors and retains its upstream license. VIctory and its variants use GPL-3.0-or-later; XCL uses GPL-2.0-only. Microsoft runtime files carry separate notices. This repository builds upstream code without patching its runtime sources.
+All launcher code belongs to its original authors and retains its upstream license. VIctory variants use GPL-3.0-or-later; XCL uses GPL-2.0-only. Microsoft runtime files retain their notices. PortWatch rankings and author reports help choose projects; they are not a performance guarantee by this builder.
 
-启动器代码属于原作者并遵循其上游许可证：VIctory 及其分支为 GPL-3.0-or-later，XCL 为 GPL-2.0-only；微软运行库保留独立许可证。本仓库不修改上游运行时代码。
+所有启动器代码属于原作者并遵循上游许可证，微软运行库保留独立声明。榜单与作者实测用于选项目，不代表本编译仓库保证相同帧率或稳定性。

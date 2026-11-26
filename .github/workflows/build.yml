@@ -1,5 +1,5 @@
 name: Build launchers / 编译启动器
-run-name: "Build ${{ inputs.project }} / 上游最新代码"
+run-name: "Build ${{ inputs.project }} / 上游最新代码 / ${{ inputs.cpu_target }}"
 
 on:
   workflow_dispatch:
@@ -16,9 +16,22 @@ on:
           - Zettrox/ztrx
           - uiliannn/VItoriaBr
           - Belobug/VIctory-Belobug-AMD
+          - DexNom/VIctory
+          - avatarmanz/VIctory-7900XTX
+      cpu_target:
+        description: CPU target / v3 requires AVX2; x86-64 supports older CPUs
+        type: choice
+        default: x86-64-v3
+        options:
+          - x86-64-v3
+          - x86-64
 
 permissions:
   contents: read
+
+concurrency:
+  group: launcher-release-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   select:
@@ -33,7 +46,7 @@ jobs:
         shell: python
         run: |
           import json, os
-          projects = ['Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD']
+          projects = ['Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX']
           selected = os.environ['PROJECT']
           if selected != 'all' and selected not in projects:
               raise SystemExit('Unsupported upstream repository')
@@ -52,6 +65,7 @@ jobs:
     uses: ./.github/workflows/build-project.yml
     with:
       upstream: ${{ matrix.upstream }}
+      cpu_target: ${{ inputs.cpu_target }}
 
   publish:
     name: Publish one combined Release / 统一发布
@@ -61,18 +75,20 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download all selected verified packages
+      - name: Download every selected package or explicit upstream 404 status
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
           merge-multiple: false
 
-      - name: Validate every project and publish one timestamped Release
+      - name: Validate all results, compare the last unified build and publish once
         shell: python
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           EXPECTED_MATRIX: ${{ needs.select.outputs.matrix }}
+          PROJECT_SELECTION: ${{ inputs.project }}
+          CPU_TARGET: ${{ inputs.cpu_target }}
         run: |
           import datetime as dt
           import hashlib
@@ -82,22 +98,37 @@ jobs:
           import re
           import shutil
           import subprocess
-          
+
           utc = dt.timezone.utc
           beijing = dt.timezone(dt.timedelta(hours=8))
+
           def stamp(value):
               result = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
               if result.tzinfo is None:
-                  raise ValueError('Compile time must include a timezone')
+                  raise ValueError('Build time must include a timezone')
               return result
+
           def show(value):
               return value.astimezone(beijing).strftime('%Y-%m-%d %H:%M:%S UTC+08:00')
+
           def sha256(path):
               with path.open('rb') as stream:
                   return hashlib.file_digest(stream, 'sha256').hexdigest()
+
           def gh(*args):
               return subprocess.run(['gh', *args], check=True, capture_output=True, text=True).stdout.strip()
-          
+
+          def valid_sha(value):
+              return isinstance(value, str) and re.fullmatch('[0-9a-f]{40}', value) is not None
+
+          def version(info):
+              if info is None:
+                  return '—'
+              sha = info.get('source_sha')
+              if valid_sha(sha):
+                  return f"[{sha[:12]}](https://github.com/{info['upstream']}/commit/{sha})"
+              return '404 / unavailable' if info.get('http_status') == 404 else '—'
+
           selected = [entry['upstream'] for entry in json.loads(os.environ['EXPECTED_MATRIX'])['include']]
           if not selected or len(selected) != len(set(selected)):
               raise ValueError('Invalid project selection')
@@ -108,137 +139,215 @@ jobs:
           expected_ids = {name.replace('/', '-') for name in selected}
           flat_single = len(selected) == 1 and (root / 'metadata.json').is_file()
           if not flat_single and {path.name for path in root.iterdir()} != expected_ids:
-              raise ValueError('Missing or unexpected project artifacts; no partial release allowed')
+              raise ValueError('Missing or unexpected project artifacts; no incomplete release allowed')
           out = Path('release')
           out.mkdir(exist_ok=False)
           infos = []
           assets = []
-          checksums = []
           for upstream in selected:
               ident = upstream.replace('/', '-')
               folder = root if flat_single else root / ident
               info = json.loads((folder / 'metadata.json').read_text(encoding='utf-8-sig'))
-              sha = info.get('source_sha', '')
-              if info.get('upstream') != upstream or not re.fullmatch('[0-9a-f]{40}', sha):
+              if info.get('upstream') != upstream or info.get('upstream_url') != f'https://github.com/{upstream}' or info.get('workflow') != run_url:
                   raise ValueError(f'Invalid provenance: {upstream}')
-              if info.get('upstream_url') != f'https://github.com/{upstream}' or info.get('workflow') != run_url:
-                  raise ValueError(f'Wrong source URL or workflow: {upstream}')
-              archive = f'{ident}-windows-x64-{sha[:12]}.zip'
-              if info.get('archive') != archive:
-                  raise ValueError(f'Invalid archive name: {upstream}')
-              expected_files = {archive, archive + '.sha256', 'metadata.json', 'RELEASE-NOTES.md'}
-              if {path.name for path in folder.iterdir()} != expected_files:
-                  raise ValueError(f'Missing or unexpected files in artifact: {upstream}')
-              zipped = folder / archive
-              digest = sha256(zipped)
-              if digest != info.get('archive_sha256') or zipped.stat().st_size != info.get('size_bytes'):
-                  raise ValueError(f'Archive checksum or size mismatch: {upstream}')
-              checksum_text = (folder / (archive + '.sha256')).read_text(encoding='utf-8-sig').strip()
-              if checksum_text != f'{digest}  {archive}':
-                  raise ValueError(f'Invalid checksum file: {upstream}')
-              started = stamp(info['compiled_started_utc'])
-              completed = stamp(info['compiled_utc'])
-              if started > completed or completed > dt.datetime.now(utc) + dt.timedelta(minutes=5):
-                  raise ValueError(f'Invalid compile interval: {upstream}')
-              info['compiled_beijing'] = show(completed)
-              for name in (archive, archive + '.sha256'):
-                  target = out / name
-                  shutil.copyfile(folder / name, target)
-                  assets.append(target)
-              metadata = out / f'{ident}-metadata.json'
+              status = info.get('status', 'built')
+              if status == 'unavailable':
+                  if info.get('http_status') != 404 or info.get('source_sha') is not None:
+                      raise ValueError(f'Only explicit upstream HTTP 404 can be skipped: {upstream}')
+                  if {path.name for path in folder.iterdir()} != {'metadata.json', 'RELEASE-NOTES.md'}:
+                      raise ValueError(f'Unexpected files in unavailable artifact: {upstream}')
+                  checked = stamp(info['checked_utc'])
+                  if checked > dt.datetime.now(utc) + dt.timedelta(minutes=5):
+                      raise ValueError(f'Invalid availability check time: {upstream}')
+              elif status == 'built':
+                  sha = info.get('source_sha')
+                  if not valid_sha(sha):
+                      raise ValueError(f'Invalid source SHA: {upstream}')
+                  opt = info.get('optimization', {})
+                  if (opt.get('opt_level'), opt.get('lto'), opt.get('codegen_units'), opt.get('cpu_target'), opt.get('diagnostics')) != (3, 'fat', 1, os.environ['CPU_TARGET'], False):
+                      raise ValueError(f'Unexpected compiler optimization: {upstream}')
+                  archive = f'{ident}-windows-x64-{sha[:12]}.zip'
+                  if info.get('archive') != archive:
+                      raise ValueError(f'Invalid archive name: {upstream}')
+                  expected_files = {archive, archive + '.sha256', 'metadata.json', 'RELEASE-NOTES.md'}
+                  if {path.name for path in folder.iterdir()} != expected_files:
+                      raise ValueError(f'Missing or unexpected files in artifact: {upstream}')
+                  zipped = folder / archive
+                  digest = sha256(zipped)
+                  if digest != info.get('archive_sha256') or zipped.stat().st_size != info.get('size_bytes'):
+                      raise ValueError(f'Archive checksum or size mismatch: {upstream}')
+                  checksum_text = (folder / (archive + '.sha256')).read_text(encoding='utf-8-sig').strip()
+                  if checksum_text != f'{digest}  {archive}':
+                      raise ValueError(f'Invalid checksum file: {upstream}')
+                  started = stamp(info['compiled_started_utc'])
+                  completed = stamp(info['compiled_utc'])
+                  if started > completed or completed > dt.datetime.now(utc) + dt.timedelta(minutes=5):
+                      raise ValueError(f'Invalid compile interval: {upstream}')
+                  info['compiled_beijing'] = show(completed)
+                  for name in (archive, archive + '.sha256'):
+                      target = out / name
+                      shutil.copyfile(folder / name, target)
+                      assets.append(target)
+              else:
+                  raise ValueError(f'Unsupported project status: {upstream}: {status}')
+              infos.append(info)
+
+          built = [info for info in infos if info.get('status', 'built') == 'built']
+          unavailable = [info for info in infos if info.get('status') == 'unavailable']
+          published = dt.datetime.now(utc)
+          started = min((stamp(info['compiled_started_utc']) for info in built), default=None)
+          completed = max((stamp(info['compiled_utc']) for info in built), default=None)
+          finished = completed or max(stamp(info['checked_utc']) for info in unavailable)
+          tag = f"build-{finished.astimezone(beijing).strftime('%Y%m%d-%H%M%S')}-{run_id}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          kind = '启动器编译 / Launcher builds' if built else '编译检查 / Build check'
+          title = f'{kind} | {show(finished)} | {len(built)} built, {len(unavailable)} unavailable'
+
+          # Compare against the last published ALL-project batch, not a newer single-project build.
+          # Legacy manifests (before selection was recorded) qualify if they have >1 project.
+          pages = json.loads(gh('api', f'repos/{repo}/releases?per_page=100', '--paginate', '--slurp'))
+          existing = [release for page in pages for release in page]
+          history = sorted((r for r in existing if not r['draft'] and not r.get('prerelease') and r['tag_name'] != tag), key=lambda r: r.get('published_at') or '', reverse=True)
+          previous_release = None
+          previous_by_repo = {}
+          for release in history:
+              if not any(a['name'] == 'BUILD-MANIFEST.json' for a in release.get('assets', [])):
+                  continue
+              history_file = Path('previous-manifest.json')
+              gh('release', 'download', release['tag_name'], '--repo', repo, '--pattern', 'BUILD-MANIFEST.json', '--output', str(history_file), '--clobber')
+              previous = json.loads(history_file.read_text(encoding='utf-8-sig'))
+              projects = previous.get('projects')
+              if not isinstance(projects, list):
+                  raise ValueError('Previous release has an invalid manifest')
+              is_all = previous.get('selection') == 'all' or ('selection' not in previous and len(projects) > 1)
+              if not is_all:
+                  continue
+              for item in projects:
+                  name = item.get('upstream')
+                  if not isinstance(name, str) or name in previous_by_repo:
+                      raise ValueError('Invalid or duplicate previous project')
+                  sha = item.get('source_sha')
+                  if sha is not None and not valid_sha(sha):
+                      raise ValueError(f'Invalid previous source SHA: {name}')
+                  previous_by_repo[name] = item
+              previous_release = {'tag': release['tag_name'], 'url': release['html_url'], 'published_at': release.get('published_at'), 'workflow': previous.get('workflow')}
+              break
+
+          for info in infos:
+              old = previous_by_repo.get(info['upstream'])
+              current_sha = info.get('source_sha')
+              old_sha = old.get('source_sha') if old else None
+              info['previous_source_sha'] = old_sha
+              info['previous_status'] = old.get('status', 'built') if old else None
+              if info.get('status') == 'unavailable':
+                  change = '404 / 无法下载源码，无法编译'
+              elif old is None:
+                  change = '新增 / new'
+              elif not old_sha:
+                  change = '恢复可用 / available again'
+              elif current_sha == old_sha:
+                  change = '相同 / unchanged'
+              else:
+                  change = '已更新 / changed'
+              info['source_change'] = change
+              metadata = out / f"{info['upstream'].replace('/', '-')}-metadata.json"
               metadata.write_text(json.dumps(info, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
               assets.append(metadata)
-              checksums.append(f'{digest}  {archive}')
-              infos.append(info)
-          
-          started = min(stamp(info['compiled_started_utc']) for info in infos)
-          completed = max(stamp(info['compiled_utc']) for info in infos)
-          published = dt.datetime.now(utc)
-          tag = f"build-{completed.astimezone(beijing).strftime('%Y%m%d-%H%M%S')}-{run_id}-{os.environ['GITHUB_RUN_ATTEMPT']}"
-          title = f'启动器编译 / Launcher builds | {show(completed)} | {len(infos)} projects'
-          manifest = {'compile_started_utc': started.isoformat(), 'compile_completed_utc': completed.isoformat(),
-                      'compile_completed_beijing': show(completed), 'published_utc': published.isoformat(),
-                      'workflow': run_url, 'workflow_commit': os.environ['GITHUB_SHA'], 'projects': infos}
+
+          manifest = {
+              'schema_version': 2, 'selection': os.environ['PROJECT_SELECTION'], 'selected_projects': selected,
+              'compile_started_utc': started.isoformat() if started else None,
+              'compile_completed_utc': completed.isoformat() if completed else None,
+              'compile_completed_beijing': show(completed) if completed else None,
+              'published_utc': published.isoformat(), 'workflow': run_url,
+              'workflow_commit': os.environ['GITHUB_SHA'], 'previous_unified_release': previous_release,
+              'cpu_target': os.environ['CPU_TARGET'], 'built_count': len(built), 'unavailable_count': len(unavailable), 'projects': infos,
+          }
           manifest_file = out / 'BUILD-MANIFEST.json'
           manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          assets.append(manifest_file)
           checksum_file = out / 'SHA256SUMS.txt'
-          checksum_file.write_text('\n'.join(checksums) + '\n', encoding='utf-8')
-          assets.extend([manifest_file, checksum_file])
+          checksum_file.write_text(''.join(f'{sha256(path)}  {path.name}\n' for path in assets), encoding='utf-8')
+          assets.append(checksum_file)
+
           notes = ['# Unified Windows x64 build / 统一构建', '',
-                   f'- **Compile completed / 编译完成时间（北京时间）: {show(completed)}**',
-                   f'- Compile started / 本批最早编译开始: {show(started)}',
+                   f'- **Compile completed / 编译完成（北京时间）: {show(completed) if completed else "无可编译项目 / no available project"}**',
+                   f'- Compile started / 本批最早编译开始: {show(started) if started else "—"}',
                    f'- Release assembled / 发布准备时间: {show(published)}',
                    f'- Build / 构建记录: {run_url}',
-                   f'- Projects / 项目数: {len(infos)}', '',
-                   'All selected projects compiled and passed package checks before this single release was published.',
-                   '所有所选项目均编译成功并通过打包校验后，才统一发布此 Release；任一项目失败则不发布。', '',
-                   '| Original repository / 原仓库 | Full source Git SHA / 完整源码版本 | Compile completed / 编译完成（UTC+08:00） | ZIP |',
-                   '| --- | --- | --- | --- |']
+                   f'- Results / 本批结果: **{len(built)} 编译成功 / built; {len(unavailable)} 项目404，无法编译 / unavailable**',
+                   f'- Compiler / 编译优化: **Release, opt-level=3, fat LTO, codegen-units=1, {os.environ["CPU_TARGET"]}, static CRT; diagnostics off**',
+                   '- x86-64-v3 requires AVX2/FMA/BMI2; choose x86-64 when manually triggering for older CPUs. Do not use the CI runner CPU as a native target.',
+                   '- x86-64-v3 需要 AVX2/FMA/BMI2；旧CPU手动触发时选择 x86-64。', '']
+          if previous_release:
+              notes += [f'- Previous unified Release / 上次全项目统一发布: [{previous_release["tag"]}]({previous_release["url"]})', '']
+          else:
+              notes += ['- Previous unified Release / 上次全项目统一发布: 无记录 / first batch', '']
+          notes += ['Only upstream HTTP 404 is skipped. Other build/package failures prevent publication. No older binary is substituted.',
+                    '仅上游404允许跳过并记录；其他编译或打包错误仍阻止发布，不使用旧二进制冒充本次构建。', '',
+                    '## Source versions / 源码版本对比（12位）', '',
+                    '| Original repository / 原仓库 | This build / 本次 Git | Previous unified build / 上次 Git | Change / 变化 | Compiled UTC+08:00 / 编译完成 |',
+                    '| --- | --- | --- | --- | --- |']
           for info in infos:
               upstream = info['upstream']
-              sha = info['source_sha']
-              notes.append(f"| [{upstream}]({info['upstream_url']}) | [{sha}](https://github.com/{upstream}/commit/{sha}) | {info['compiled_beijing']} | {info['archive']} |")
-          notes += ['', '## Provenance / 构建详情', '']
-          for info in infos:
+              change = info['source_change']
+              old_sha = info['previous_source_sha']
+              current_sha = info.get('source_sha')
+              if valid_sha(old_sha) and valid_sha(current_sha) and old_sha != current_sha:
+                  change = f'[{change}](https://github.com/{upstream}/compare/{old_sha}...{current_sha})'
+              notes.append(f"| [{upstream}]({info['upstream_url']}) | {version(info)} | {version(previous_by_repo.get(upstream))} | {change} | {info.get('compiled_beijing', '—')} |")
+
+          if unavailable:
+              notes += ['', '## Unavailable sources / 无法编译项目', '']
+              for info in unavailable:
+                  notes += [f"- **{info['upstream']}: HTTP 404 — 项目404，无法下载源码，无法编译。** No package for this project in this release.",
+                            f"  Checked / 检查时间: {show(stamp(info['checked_utc']))}. GitHub 404 alone does not distinguish deleted from private or inaccessible."]
+          notes += ['', '## Packages and provenance / 压缩包和构建详情', '']
+          for info in built:
               notes += [f"### {info['upstream']}",
                         f"- Original repository / 原仓库: {info['upstream_url']}",
-                        f"- Source Git SHA / 编译源码完整 SHA: {info['source_sha']}",
-                        f"- Branch / 分支: {info['source_branch']}",
-                        f"- Source commit date / 源码提交时间: {info['source_commit_date']}",
-                        f"- Compile started / 编译开始: {show(stamp(info['compiled_started_utc']))}",
-                        f"- Compile completed / 编译完成: {info['compiled_beijing']}",
-                        f"- Git: {info['git_version']}", f"- Rust: {info['rust_version']}",
-                        f"- ZIP directory / 解压目录: {info['upstream']}/",
-                        f"- Archive size / 压缩包大小: {info['size_bytes']} bytes",
-                        f"- SHA-256: {info['archive_sha256']}", '']
+                        f"- Source Git / 编译源码: {version(info)}; branch / 分支: {info['source_branch']}",
+                        f"- Commit time / 源码提交时间: {info['source_commit_date']}",
+                        f"- Compile / 编译时间: {show(stamp(info['compiled_started_utc']))} → {info['compiled_beijing']}",
+                        f"- Git client: {info['git_version']}; Rust: {info['rust_version']}",
+                        f"- ZIP: `{info['archive']}` ({info['size_bytes']} bytes), directory: `{info['upstream']}/`",
+                        f"- SHA-256: `{info['archive_sha256']}`"]
               preset = info.get('runtime_preset')
               if preset:
-                  notes += [f"- Runtime preset / 运行预设: {preset['name']}",
-                            f"- Preset documentation / 参数来源: {preset['readme']}",
-                            'Use this package’s Launch.bat to apply the runtime switches. A bare EXE launch does not apply them.',
-                            '请使用本包 Launch.bat 应用运行时开关；直接启动 EXE 不会自动应用。',
-                            'Upstream reported 8-10 FPS in first rooms on i7-14700KF / RTX 4070 12GB / 32GB RAM. This package is not gameplay-benchmarked.',
-                            '作者测试机首个房间 8-10 帧，过场 5-8.5 帧；本包未做游戏帧率实测，不保证相同表现。',
-                            '~~~bat']
-                  notes += [f'set "{key}={value}"' for key, value in preset['environment'].items()]
-                  notes += ['~~~', '']
+                  notes += [f"- Runtime preset / 运行预设: `{preset['name']}` ([upstream settings / 参数来源]({preset['readme']})). Use **Launch.bat**; see PERFORMANCE.md and RUNTIME-PRESET.json in the ZIP.",
+                            f"- Upstream report / 上游说明: {preset['reported_fps']}"]
+              notes += ['']
           notes += ['## Download and run / 下载使用', '',
-                    'Download your chosen project ZIP from Assets. Extract the entire ZIP and run Launch.bat inside original-owner/original-repository/.',
-                    '在 Assets 中下载所需项目的 ZIP，完整解压后运行“原作者/仓库名/Launch.bat”。',
-                    'Each package includes its executable, launcher, exact source.zip, license notices and checksums.',
-                    '每个压缩包包含程序、启动脚本、对应源码 source.zip、许可证和校验信息。',
-                    'XCL bundles DXC/Agility runtimes; Windows Gaming Services must still be installed separately.',
-                    'XCL 附带 DXC/Agility 运行库，但仍需系统安装 Gaming Services。',
-                    'No game files are included. Compile, CLI and archive checks do not verify gameplay or GPU rendering.',
-                    '不含游戏文件；仅验证编译、命令行及压缩包完整性，未验证实际游戏或 GPU 渲染。',
-                    'Automatic Source code assets are for this workflow repository; launcher sources are inside each package.',
-                    'GitHub 自动附加的 Source code 属于工作流仓库；实际启动器源码位于各压缩包内。']
+                    'Download the chosen project ZIP, extract it entirely, and run **original-owner/original-repository/Launch.bat**. Drag the game EXE onto the BAT or enter its path.',
+                    '下载所需项目ZIP，完整解压，在“原作者/仓库名”目录运行 **Launch.bat**，或把游戏主程序拖到BAT上。',
+                    'Each successful package contains an executable, exact source.zip, license notices, build metadata and checksums. Full Git SHAs are preserved in BUILD-MANIFEST.json and metadata; this page shows 12 characters.',
+                    '完整提交号保存在清单和metadata中，页面只显示12位，便于对比。404项目仅有状态记录，不附旧版本程序。',
+                    'DexNom includes victory.exe, victory-play.exe and victory-warm.exe; its BAT uses the README no-RT path, including for NVIDIA. Use victory-play.exe explicitly for optional RT/FSR settings.',
+                    'XCL bundles verified DXC/Agility runtimes; Windows Gaming Services is still required.',
+                    'No game files. Compilation, CLI and archive checks do not verify gameplay, rendering correctness, crash freedom or 30 FPS. Shader caches can rebuild after an upstream update.',
+                    '不含游戏文件；最高级别编译优化不保证稳定30帧、画面无误或不崩溃。上游更新后可能重建着色器缓存。',
+                    'Automatic Source code assets are this workflow repository. Launcher sources are inside each package.']
           notes_file = out / 'RELEASE-NOTES.md'
           notes_file.write_text('\n'.join(notes) + '\n', encoding='utf-8')
-          # Keep the release private as a draft until every verified asset has uploaded.
-          existing = json.loads(gh('api', f'repos/{repo}/releases?per_page=100'))
           matching = next((release for release in existing if release['tag_name'] == tag), None)
           if matching:
               if not matching['draft']:
                   raise ValueError('This run already has a published release')
               gh('release', 'delete', tag, '--repo', repo, '--yes')
-          gh('release', 'create', tag, '--repo', repo, '--target', os.environ['GITHUB_SHA'],
-             '--title', title, '--notes-file', str(notes_file), '--draft')
+          gh('release', 'create', tag, '--repo', repo, '--target', os.environ['GITHUB_SHA'], '--title', title, '--notes-file', str(notes_file), '--draft')
           gh('release', 'upload', tag, *map(str, assets), '--repo', repo)
-          remote_releases = json.loads(gh('api', f'repos/{repo}/releases?per_page=100'))
-          remote = next((release for release in remote_releases if release['tag_name'] == tag), None)
+          remote_pages = json.loads(gh('api', f'repos/{repo}/releases?per_page=100', '--paginate', '--slurp'))
+          remote = next((r for page in remote_pages for r in page if r['tag_name'] == tag), None)
           if remote is None or not remote['draft']:
               raise ValueError('Uploaded draft release not found')
           remote_assets = {asset['name']: asset for asset in remote['assets']}
           if set(remote_assets) != {path.name for path in assets}:
               raise ValueError('Draft release asset list mismatch')
           for path in assets:
-              remote_asset = remote_assets[path.name]
-              if remote_asset['size'] != path.stat().st_size or remote_asset.get('digest') != 'sha256:' + sha256(path):
+              asset = remote_assets[path.name]
+              if asset['size'] != path.stat().st_size or asset.get('digest') != 'sha256:' + sha256(path):
                   raise ValueError(f'Uploaded asset verification failed: {path.name}')
           gh('release', 'edit', tag, '--repo', repo, '--draft=false', '--latest')
           url = gh('release', 'view', tag, '--repo', repo, '--json', 'url', '--jq', '.url')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write(f'## {title}\n\n{url}\n\n')
-              summary.write('\n'.join(notes) + '\n')
-          print(json.dumps({'release': url, 'projects': len(infos), 'assets': len(assets), 'compile_completed_beijing': show(completed)}, ensure_ascii=False))
+              summary.write(f'## {title}\n\n{url}\n\n' + '\n'.join(notes) + '\n')
+          print(json.dumps({'release': url, 'built': len(built), 'unavailable': len(unavailable), 'previous_unified_release': previous_release}, ensure_ascii=False))

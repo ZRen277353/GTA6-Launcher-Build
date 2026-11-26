@@ -6,6 +6,9 @@ on:
       upstream:
         type: string
         required: true
+      cpu_target:
+        type: string
+        default: x86-64-v3
 
 permissions:
   contents: read
@@ -13,14 +16,19 @@ permissions:
 jobs:
   build:
     runs-on: windows-2025
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
+      CARGO_PROFILE_RELEASE_LTO: fat
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+      CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static -C target-cpu=${{ inputs.cpu_target }}
+      CPU_TARGET: ${{ inputs.cpu_target }}
       UPSTREAM: ${{ inputs.upstream }}
     outputs:
       artifact: ${{ steps.source.outputs.id }}
@@ -34,13 +42,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD')
+          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX')
           if ($env:UPSTREAM -cnotin $allowed) { throw 'Unsupported upstream repository.' }
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          if ($env:CPU_TARGET -cnotin @('x86-64-v3', 'x86-64')) { throw 'Unsupported CPU target.' }
+          "id=$($env:UPSTREAM.Replace('/', '-'))" >> $env:GITHUB_OUTPUT
           $url = "$env:GITHUB_API_URL/repos/$env:UPSTREAM"
-          $repo = Invoke-RestMethod -Uri $url -Headers $headers
-          $branch = [Uri]::EscapeDataString($repo.default_branch)
-          $commit = Invoke-RestMethod -Uri "$url/commits/$branch" -Headers $headers
+          try {
+              $repo = Invoke-RestMethod -Uri $url -Headers $headers
+              $branch = [Uri]::EscapeDataString($repo.default_branch)
+              $commit = Invoke-RestMethod -Uri "$url/commits/$branch" -Headers $headers
+          } catch {
+              if ([int]$_.Exception.Response.StatusCode -ne 404) { throw }
+              # Only an upstream repository/commit HTTP 404 is skippable.
+              # Compiler errors, permissions, rate limits and dependency errors still fail the batch.
+              $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
+              [System.IO.Directory]::CreateDirectory($dist) | Out-Null
+              $info = [ordered]@{
+                  upstream = $env:UPSTREAM; upstream_url = "https://github.com/$env:UPSTREAM"
+                  status = 'unavailable'; http_status = 404; source_sha = $null
+                  source_branch = $null; checked_utc = [DateTime]::UtcNow.ToString('o')
+                  workflow = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+                  reason = 'HTTP 404: project source unavailable; cannot compile / 项目404，无法下载源码，无法编译'
+              }
+              $utf8 = [System.Text.UTF8Encoding]::new($false)
+              [System.IO.File]::WriteAllText((Join-Path $dist 'metadata.json'), ($info | ConvertTo-Json -Depth 8), $utf8)
+              [System.IO.File]::WriteAllText((Join-Path $dist 'RELEASE-NOTES.md'), "$env:UPSTREAM : $($info.reason)", $utf8)
+              "available=false" >> $env:GITHUB_OUTPUT
+              Write-Host "$env:UPSTREAM : $($info.reason)"
+              return
+          }
+          "available=true" >> $env:GITHUB_OUTPUT
           if ($commit.sha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid upstream SHA.' }
           "sha=$($commit.sha)" >> $env:GITHUB_OUTPUT
           "branch=$($repo.default_branch)" >> $env:GITHUB_OUTPUT
@@ -48,6 +80,7 @@ jobs:
           Write-Host "Building $env:UPSTREAM@$($commit.sha) from $($repo.default_branch)"
 
       - name: Check out exactly the resolved upstream SHA
+        if: steps.source.outputs.available == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.upstream }}
@@ -55,7 +88,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Install upstream Rust toolchain and compile release
+      - name: Install upstream Rust toolchain and compile optimized release
+        if: steps.source.outputs.available == 'true'
         id: compile
         run: |
           $ErrorActionPreference = 'Stop'
@@ -70,13 +104,20 @@ jobs:
           rustc --version --verbose
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $package = if ($env:UPSTREAM -eq 'xcl-dev/xcl') { 'xcl' } else { 'victory' }
+          if ($env:UPSTREAM -ceq 'DexNom/VIctory') {
+              & .\Initialize-FormatTables.ps1
+              if (-not $?) { throw 'DexNom format table initialization failed.' }
+          }
           $compileStarted = [DateTime]::UtcNow.ToString('o')
-          cargo build --release --locked --package $package --bin $package --target x86_64-pc-windows-msvc
+          $buildArgs = @('build', '--release', '--locked', '--package', $package, '--target', 'x86_64-pc-windows-msvc')
+          if ($env:UPSTREAM -ceq 'DexNom/VIctory') { $buildArgs += '--bins' } else { $buildArgs += @('--bin', $package) }
+          cargo @buildArgs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "started_utc=$compileStarted" >> $env:GITHUB_OUTPUT
           "completed_utc=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_OUTPUT
 
       - name: Package owner/repository portable archive and verify extraction
+        if: steps.source.outputs.available == 'true'
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           SOURCE_BRANCH: ${{ steps.source.outputs.branch }}
@@ -105,6 +146,11 @@ jobs:
           $binaryName = if ($isXcl) { 'xcl.exe' } else { 'victory.exe' }
           $binary = Join-Path $env:CARGO_TARGET_DIR "x86_64-pc-windows-msvc/release/$binaryName"
           Copy-Item -LiteralPath $binary -Destination $root
+          if ($repo -ceq 'DexNom/VIctory') {
+              foreach ($extra in @('victory-play.exe', 'victory-warm.exe')) {
+                  Copy-Item -LiteralPath (Join-Path (Split-Path $binary -Parent) $extra) -Destination $root
+              }
+          }
           & (Join-Path $root $binaryName) --help
           if ($LASTEXITCODE -ne 0) { throw 'Executable --help failed.' }
           foreach ($file in @('LICENSE', 'README.md', 'THIRD_PARTY.md', 'victory.example.toml')) {
@@ -138,78 +184,97 @@ jobs:
               Copy-Notices $agility (Join-Path $root 'licenses/Agility')
           }
           $runtimePreset = $null
+          $runtimeEnv = [ordered]@{}
           $presetCommands = 'rem No project-specific runtime preset.'
           if ($repo -ceq 'fxceless/victory-fork') {
               $runtimeEnv = [ordered]@{
-                  VICTORY_LEVELS_ON_DEMAND = '1'
-                  VICTORY_ASYNC_SUBMIT = '1'
-                  VICTORY_QUEUE2 = '1'
-                  VICTORY_INDIRECT_WINDOW = '1'
-                  VICTORY_TEXTURE_NO_WAIT = '1'
-                  VICTORY_MERGE_GAP = '64'
-                  VICTORY_MERGE_RUNS = '4096'
-                  VICTORY_STAGING_POOL = '0'
-                  VICTORY_COPY_PLAIN = '1'
-                  VICTORY_JOIN_PARTS = '1'
-                  VICTORY_BACK_OWN_VIEW = '1'
-                  VICTORY_INDIRECT_GATHER = '1'
-                  VICTORY_CARD_REHASH_RUNS = '1'
-                  VICTORY_CARD_WINDOWS_MB = '2048'
-                  VICTORY_CARD_BUFFERS_MIN_KB = '64'
-                  VICTORY_CARD_BUFFERS_MB = '1280'
-                  VICTORY_TEXTURE_BACK = '1'
-                  VICTORY_CARD_HASH_LEN = '1'
-                  VICTORY_SHADER_OPT = '63'
+                  VICTORY_LEVELS_ON_DEMAND = '1'; VICTORY_ASYNC_SUBMIT = '1'; VICTORY_QUEUE2 = '1'
+                  VICTORY_INDIRECT_WINDOW = '1'; VICTORY_TEXTURE_NO_WAIT = '1'; VICTORY_MERGE_GAP = '64'
+                  VICTORY_MERGE_RUNS = '4096'; VICTORY_STAGING_POOL = '0'; VICTORY_COPY_PLAIN = '1'
+                  VICTORY_JOIN_PARTS = '1'; VICTORY_BACK_OWN_VIEW = '1'; VICTORY_INDIRECT_GATHER = '1'
+                  VICTORY_CARD_REHASH_RUNS = '1'; VICTORY_CARD_WINDOWS_MB = '2048'
+                  VICTORY_CARD_BUFFERS_MIN_KB = '64'; VICTORY_CARD_BUFFERS_MB = '1280'
+                  VICTORY_TEXTURE_BACK = '1'; VICTORY_CARD_HASH_LEN = '1'; VICTORY_SHADER_OPT = '63'
+                  VICTORY_LOOKUP_CACHE = '1'
               }
-              $clearEnv = @('VICTORY_GPU_TIMING', 'VICTORY_D3D12_DRED', 'VICTORY_D3D12_DEBUG', 'VICTORY_D3D12_GBV', 'VICTORY_D3D12_WARP', 'VICTORY_PROFILE', 'VICTORY_BACK_READS', 'VICTORY_WAVE_WIDE')
               $runtimePreset = [ordered]@{
-                  name = 'fxceless-readme-run279'
-                  kind = 'runtime-environment'; compile_profile = 'release'
-                  basis = 'README run-253 measured switch set plus documented run-279 additions'
-                  reference_sha = '6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d'
-                  readme = 'https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/README.md'
-                  diagnostics_readme = 'https://github.com/fxceless/victory-fork/blob/6d20eed6ae8afe37c52f1911b46537b0ea8bcd0d/diagnostics/README.md'
-                  compiled_source_readme = "https://github.com/$repo/blob/$sha/README.md"
-                  environment = $runtimeEnv; clear_environment = $clearEnv
-                  extra_arguments = @('--console', 'series-x')
+                  name = 'fxceless-readme-run293'; kind = 'runtime-environment'; compile_profile = 'release'
+                  basis = 'Run-279 switches plus the measured run-293 lookup cache; unmeasured experiments remain upstream defaults'
+                  reference_sha = '988aa41608cace81a54923e7d26ff6b561e3cf30'
+                  readme = 'https://github.com/fxceless/victory-fork/blob/988aa41608cace81a54923e7d26ff6b561e3cf30/README.md'
+                  diagnostics_readme = 'https://github.com/fxceless/victory-fork/blob/988aa41608cace81a54923e7d26ff6b561e3cf30/diagnostics/README.md'
                   reported_hardware = 'Windows 11; i7-14700KF; RTX 4070 12GB; 32GB RAM'
-                  reported_fps = '8-10 in first rooms with base switches; 5-8.5 in opening cutscene; upstream self-report'
-                  gameplay_tested = $false
+                  reported_fps = 'README: 9-12 FPS in light scenes, 5-6 in heavy outdoor views; run-293 lookup cache saved about 14 ms/frame at equal draws'
               }
-              $commands = @('rem fxceless README runtime performance preset; not compile-time Rust flags.')
+          } elseif ($repo -ceq 'avatarmanz/VIctory-7900XTX') {
+              # Read literal settings from the exact compiled source. Do not execute its play script.
+              $playPath = 'scripts/play.ps1'
+              $play = Get-Content -LiteralPath $playPath -Raw
+              $base = [regex]::Match($play, '(?s)\$settings\s*=\s*@\{(?<base>.*?)\r?\n\}')
+              $fast = [regex]::Match($play, '(?s)\} else \{(?<fast>.*?)\r?\n\}')
+              if (-not $base.Success -or -not $fast.Success) { throw 'Upstream play.ps1 format changed; review its performance preset.' }
+              foreach ($entry in [regex]::Matches($base.Groups['base'].Value, "(VICTORY_[A-Z0-9_]+)\s*=\s*'([^']*)'")) {
+                  $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value
+              }
+              foreach ($entry in [regex]::Matches($fast.Groups['fast'].Value, '\$settings\.(VICTORY_[A-Z0-9_]+)\s*=\s*''([^'']*)''')) {
+                  $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value
+              }
+              if ($runtimeEnv.Count -lt 15 -or $runtimeEnv['VICTORY_THIN'] -cne '1') { throw 'Incomplete upstream performance preset.' }
+              $runtimeEnv.Remove('VICTORY_D3D12_DRED')
+              $runtimePreset = [ordered]@{
+                  name = 'avatarmanz-upstream-play-fast'; kind = 'runtime-environment'; compile_profile = 'release'
+                  basis = 'Exact source scripts/play.ps1 default performance settings, without timing/debug instrumentation or optional ray tracing'
+                  reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/scripts/play.ps1"
+                  diagnostics_readme = "https://github.com/$repo/blob/$sha/docs/findings.md"
+                  reported_hardware = 'Windows 11; i9-12900K; RX 7900 XTX; 64GB RAM; 1440p'
+                  reported_fps = 'README: 13-20 FPS indoors, 19-22 on the boat, 6-10 in heavy street scenes; AMD tuning, NVIDIA unverified'
+              }
+              Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'play.upstream.ps1')
+              if (Test-Path -LiteralPath 'docs') { Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse }
+          } elseif ($repo -ceq 'DexNom/VIctory') {
+              $runtimeEnv = [ordered]@{ VICTORY_RAY_TRACING = '0' }
+              $runtimePreset = [ordered]@{
+                  name = 'dexnom-no-rt'; kind = 'runtime-environment'; compile_profile = 'release'
+                  basis = 'Upstream README no-RT path, also recommended there for untested NVIDIA; all three portable executables included'
+                  reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/README.md"
+                  diagnostics_readme = "https://github.com/$repo/blob/$sha/README.md#experimental-nvidia"
+                  reported_hardware = 'AMD Radeon primary target; NVIDIA gameplay untested upstream'
+                  reported_fps = 'No package gameplay benchmark; optional ray tracing and FSR must be selected explicitly using victory-play.exe'
+              }
+          }
+          if ($null -ne $runtimePreset) {
+              $clearEnv = @('VICTORY_GPU_TIMING', 'VICTORY_D3D12_DRED', 'VICTORY_D3D12_DEBUG', 'VICTORY_D3D12_GBV', 'VICTORY_D3D12_WARP', 'VICTORY_PROFILE', 'VICTORY_BACK_READS', 'VICTORY_WAVE_WIDE')
+              $runtimePreset.compiled_source_readme = "https://github.com/$repo/blob/$sha/README.md"
+              $runtimePreset.environment = $runtimeEnv; $runtimePreset.clear_environment = $clearEnv
+              $runtimePreset.extra_arguments = @('--console', 'series-x'); $runtimePreset.gameplay_tested = $false
+              foreach ($entry in $runtimeEnv.GetEnumerator()) {
+                  if ($entry.Key -notmatch '^VICTORY_[A-Z0-9_]+$' -or $entry.Value -notmatch '^[A-Za-z0-9_.+-]+$') { throw 'Unsafe runtime preset literal.' }
+              }
+              $commands = @('rem Upstream runtime performance preset; see PERFORMANCE.md.')
               $commands += @($runtimeEnv.GetEnumerator() | ForEach-Object { 'set "' + $_.Key + '=' + $_.Value + '"' })
               $commands += @($clearEnv | ForEach-Object { 'set "' + $_ + '="' })
-              $commands += @('if /i "%~1"=="--print-runtime-preset" (', '  echo Runtime preset: fxceless-readme-run279', '  set VICTORY_', '  popd', '  exit /b 0', ')', 'echo Using fxceless README performance preset - Series X; FPS is hardware dependent.')
+              $commands += @('if /i "%~1"=="--print-runtime-preset" (', ('  echo Runtime preset: ' + $runtimePreset.name), '  set VICTORY_', '  popd', '  exit /b 0', ')', 'echo Using upstream performance preset; FPS is hardware dependent.')
               $presetCommands = $commands -join [Environment]::NewLine
               [System.IO.File]::WriteAllText((Join-Path $root 'RUNTIME-PRESET.json'), ($runtimePreset | ConvertTo-Json -Depth 8), $utf8)
               $performanceNotes = @(
-                  '# fxceless README performance preset / README 性能预设'
+                  '# Runtime performance preset / 运行性能预设'
                   ''
-                  'Use Launch.bat (or drag the game EXE onto it). Runtime switches are set before victory.exe starts.'
-                  '使用 Launch.bat，或将游戏主程序拖到它上面；脚本在启动 victory.exe 之前设置性能开关。'
-                  'These are runtime environment variables. Setting them only during cargo build does not enable them when playing.'
-                  '这些是运行时环境变量，仅在 cargo build 阶段设置不会使游玩时自动生效；直接启动 EXE 不会自动应用本预设。'
-                  'Compiled with cargo build --release --locked, without the diagnostics feature or timing instrumentation.'
-                  '使用 --release --locked 编译，不启用 diagnostics 特性或计时诊断开销。'
-                  ('Preset reference / 预设说明来源: ' + $runtimePreset.readme)
-                  ('Additional switches / 补充开关来源: ' + $runtimePreset.diagnostics_readme)
-                  ('Actual compiled source / 实际编译源码: https://github.com/' + $repo + '/commit/' + $sha)
-                  'The base switches are the README run-253 set behind the reported 8-10 FPS; run 279 adds the window/buffer budgets, texture copy-back and shorter buffer hashes.'
-                  '基础开关对应 README 中测得 8-10 帧的 run 253；另加入作者 run 279 推荐的显存窗口、缓冲预算、纹理回写和短哈希开关。'
-                  'Shader optimizations stay at 63 (not the 127 grouped-load experiment); wave64 uses upstream defaults. Timing/debug environment variables are cleared for this launch.'
-                  '着色器优化保持 63，不启用会导致黑水的 127 实验；wave64 保留上游默认设置，并清除计时和调试环境变量。'
-                  'Upstream measurements: Windows 11, i7-14700KF, RTX 4070 12GB, 32GB RAM; Series X. 8-10 FPS in the first rooms, 5-8.5 in the opening cutscene, not a guarantee for your hardware.'
-                  '作者测试机为 Win11、i7-14700KF、RTX 4070 12GB、32GB 内存，Series X 模式；首个房间约 8-10 帧、过场 5-8.5 帧，不保证你的机器达到相同帧率。'
-                  'Run-279 budgets include a 2048 MiB card-window budget and a 1280 MiB buffer budget. These are partial budgets, not total VRAM requirements.'
-                  'Run 279 包含 2048 MiB 显存窗口预算及 1280 MiB 缓冲预算；这些只是部分预算，不代表总显存需求。'
-                  'The upstream still reports missing shadow/indirect lighting and experimental stability. No gameplay or GPU benchmark was run for this package.'
-                  '上游仍有阴影、间接光缺失及实验性稳定性问题；本包未做游戏实测或 GPU 基准测试。'
+                  'Use Launch.bat, or drag the game EXE onto it, to apply these runtime settings before the game starts.'
+                  '通过 Launch.bat 启动或将游戏 EXE 拖到它上面，才能应用运行参数；单独运行 victory.exe 不会自动应用。'
+                  'Optimized Release: opt-level=3, fat LTO, one codegen unit, static CRT; no diagnostics feature.'
+                  ('CPU target / CPU 指令集: ' + $env:CPU_TARGET)
+                  ('Basis / 来源: ' + $runtimePreset.basis)
+                  ('Reference / 参数文档: ' + $runtimePreset.readme)
+                  ('Upstream observations / 上游测量: ' + $runtimePreset.reported_fps)
+                  'Compiler optimization cannot guarantee 30 FPS or fix missing rendering features and upstream crashes.'
+                  '编译优化无法保证稳定30帧，也不能修复上游尚未实现的渲染功能或所有崩溃。本包未做游戏帧率实测。'
+                  'Shader opt 127 and forced wave64 are not enabled. VRAM budgets are partial budgets, not total memory requirements.'
+                  '未开启 shader opt 127 或强制 wave64；显存窗口和缓冲预算只是部分预算。'
                   ''
-                  '## Applied environment / 实际环境变量'
                   '~~~bat'
               )
               $performanceNotes += @($runtimeEnv.GetEnumerator() | ForEach-Object { 'set "' + $_.Key + '=' + $_.Value + '"' })
-              $performanceNotes += @('~~~', '', 'CLI: victory.exe run "<game.exe>" --execute --console series-x', 'Inspect without starting the game: Launch.bat --print-runtime-preset')
+              $performanceNotes += @('~~~', '', 'Inspect without launching: Launch.bat --print-runtime-preset')
               [System.IO.File]::WriteAllLines((Join-Path $root 'PERFORMANCE.md'), $performanceNotes, $utf8)
           }
           $launcher = @'
@@ -274,7 +339,7 @@ jobs:
           $buildUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           $binaryHash = (Get-FileHash -LiteralPath (Join-Path $root $binaryName) -Algorithm SHA256).Hash.ToLowerInvariant()
           $info = [ordered]@{
-              upstream = $repo; upstream_url = "https://github.com/$repo"; source_sha = $sha
+              upstream = $repo; upstream_url = "https://github.com/$repo"; source_sha = $sha; status = 'built'
               source_branch = $env:SOURCE_BRANCH; source_commit_date = $commitDate
               source_url = "https://github.com/$repo/commit/$sha"; workflow = $buildUrl
               git_version = $gitVersion; rust_version = $rustVersion
@@ -282,6 +347,8 @@ jobs:
               compiled_beijing = [DateTimeOffset]::Parse($env:COMPILED_UTC).ToOffset([TimeSpan]::FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss 'UTC+08:00'")
               built_utc = [DateTime]::UtcNow.ToString('o'); binary = $binaryName; binary_sha256 = $binaryHash
               profile = 'release'; target = 'x86_64-pc-windows-msvc'; crt = 'static'
+              optimization = [ordered]@{ opt_level = 3; lto = 'fat'; codegen_units = 1; cpu_target = $env:CPU_TARGET; diagnostics = $false; rustflags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS }
+              format_table_sha256 = $(if ($repo -ceq 'DexNom/VIctory') { (Get-FileHash -LiteralPath 'crates/victory-formats/src/bcpack-tables.bin' -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
               dxc = $(if ($isXcl) { 'v1.9.2609' } else { $null })
               agility = $(if ($isXcl) { '1.620.2' } else { $null })
               dependency_archives = $(if ($isXcl) { @(
@@ -333,7 +400,7 @@ jobs:
           $notes = @(
               "## $repo - Windows x64 portable build / 便携构建"
               "- Original repository / 原仓库: https://github.com/$repo"
-              "- Git commit / 编译源码完整 SHA: $sha"
+              "- Git commit / 编译源码版本: $($sha.Substring(0, 12))"
               "- Source / 源码: https://github.com/$repo/commit/$sha"
               "- Compile completed / 编译完成时间: $($info.compiled_beijing)"
               "- Compile completed UTC: $($info.compiled_utc)"
@@ -360,7 +427,7 @@ jobs:
           [System.IO.File]::WriteAllLines((Join-Path $dist 'RELEASE-NOTES.md'), $notes, $utf8)
           Write-Host "Verified archive: $zipName; upstream: $sha; SHA256: $zipHash"
 
-      - name: Transfer verified release files to publisher
+      - name: Transfer verified packages or explicit 404 status to publisher
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.source.outputs.id }}
