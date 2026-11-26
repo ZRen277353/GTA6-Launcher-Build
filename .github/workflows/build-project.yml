@@ -238,6 +238,9 @@ jobs:
               foreach ($entry in [regex]::Matches($play, '(?im)^if not defined (VICTORY_[A-Z0-9_]+) set "\1=(?<value>[A-Za-z0-9_.+-]+)"\s*$')) {
                   $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups['value'].Value
               }
+              $quiet = [regex]::Match($play, '(?im)^if not defined VICTORY_LOG if not defined RUST_LOG set "VICTORY_LOG=(?<value>[A-Za-z0-9_.+-]+)"\s*$')
+              if (-not $quiet.Success) { throw 'Upstream cool_fox logging default changed; review before packaging.' }
+              $runtimeEnv['VICTORY_LOG'] = $quiet.Groups['value'].Value
               if ($runtimeEnv.Count -lt 18 -or $runtimeEnv['VICTORY_THIN'] -cne '1' -or $runtimeEnv['VICTORY_LEVELS_ON_DEMAND'] -cne '1' -or $play -notmatch '--console series-s') {
                   throw 'Upstream cool_fox performance launcher changed; review the preset before packaging.'
               }
