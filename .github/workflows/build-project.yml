@@ -42,7 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX')
+          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX', 'carlm125/cool_fox')
           if ($env:UPSTREAM -cnotin $allowed) { throw 'Unsupported upstream repository.' }
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
           if ($env:CPU_TARGET -cnotin @('x86-64-v3', 'x86-64')) { throw 'Unsupported CPU target.' }
@@ -231,6 +231,26 @@ jobs:
               }
               Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'play.upstream.ps1')
               if (Test-Path -LiteralPath 'docs') { Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse }
+          } elseif ($repo -ceq 'carlm125/cool_fox') {
+              # Parse safe literal defaults from this exact source; never execute upstream CMD.
+              $playPath = 'Play-VIctory.cmd'
+              $play = Get-Content -LiteralPath $playPath -Raw
+              foreach ($entry in [regex]::Matches($play, '(?im)^if not defined (VICTORY_[A-Z0-9_]+) set "\1=(?<value>[A-Za-z0-9_.+-]+)"\s*$')) {
+                  $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups['value'].Value
+              }
+              if ($runtimeEnv.Count -lt 18 -or $runtimeEnv['VICTORY_THIN'] -cne '1' -or $runtimeEnv['VICTORY_LEVELS_ON_DEMAND'] -cne '1' -or $play -notmatch '--console series-s') {
+                  throw 'Upstream cool_fox performance launcher changed; review the preset before packaging.'
+              }
+              $runtimePreset = [ordered]@{
+                  name = 'cool-fox-upstream-pareto-residency'; kind = 'runtime-environment'; compile_profile = 'release'
+                  basis = 'Exact source Play-VIctory.cmd pareto-residency defaults, Series S, no diagnostics feature; no unmeasured shader or ray-tracing switches'
+                  reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/Play-VIctory.cmd"
+                  diagnostics_readme = "https://github.com/$repo/blob/$sha/README.md"
+                  reported_hardware = 'Upstream launcher describes an RTX-tested residency preset; package not benchmarked'
+                  reported_fps = 'No FPS guarantee; README retains AMD measurements and recommends 64 GB RAM for that configuration'
+              }
+              Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'Play-VIctory.upstream.cmd')
+              if (Test-Path -LiteralPath 'docs') { Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse }
           } elseif ($repo -ceq 'DexNom/VIctory') {
               $runtimeEnv = [ordered]@{ VICTORY_RAY_TRACING = '0' }
               $runtimePreset = [ordered]@{
@@ -246,7 +266,10 @@ jobs:
               $clearEnv = @('VICTORY_GPU_TIMING', 'VICTORY_D3D12_DRED', 'VICTORY_D3D12_DEBUG', 'VICTORY_D3D12_GBV', 'VICTORY_D3D12_WARP', 'VICTORY_PROFILE', 'VICTORY_BACK_READS', 'VICTORY_WAVE_WIDE')
               $runtimePreset.compiled_source_readme = "https://github.com/$repo/blob/$sha/README.md"
               $runtimePreset.environment = $runtimeEnv; $runtimePreset.clear_environment = $clearEnv
-              $runtimePreset.extra_arguments = @('--console', 'series-x'); $runtimePreset.gameplay_tested = $false
+              $console = if ($repo -ceq 'carlm125/cool_fox') { 'series-s' } else { 'series-x' }
+              if ($repo -ceq 'carlm125/cool_fox') { $clearEnv += @('VICTORY_HOST_WAVE', 'VICTORY_HOST_MAX_WAVE', 'VICTORY_VIEW_LIMIT', 'VICTORY_WARM_SECONDS') }
+              $runtimePreset.clear_environment = $clearEnv
+              $runtimePreset.extra_arguments = @('--console', $console); $runtimePreset.gameplay_tested = $false
               foreach ($entry in $runtimeEnv.GetEnumerator()) {
                   if ($entry.Key -notmatch '^VICTORY_[A-Z0-9_]+$' -or $entry.Value -notmatch '^[A-Za-z0-9_.+-]+$') { throw 'Unsafe runtime preset literal.' }
               }
@@ -317,9 +340,184 @@ jobs:
           '@
           $launcher = $launcher.Replace('rem PROJECT_RUNTIME_PRESET', $presetCommands)
           if ($null -ne $runtimePreset) {
-              $launcher = $launcher.Replace('victory.exe" run "%GAME%" --execute', 'victory.exe" run "%GAME%" --execute --console series-x')
+              $launcher = $launcher.Replace('victory.exe" run "%GAME%" --execute', ('victory.exe" run "%GAME%" --execute ' + ($runtimePreset.extra_arguments -join ' ')))
           }
           [System.IO.File]::WriteAllText((Join-Path $root 'Launch.bat'), (($launcher -replace '\r?\n', [Environment]::NewLine) + [Environment]::NewLine), [System.Text.Encoding]::ASCII)
+          if ($repo -ceq 'carlm125/cool_fox') {
+              $precompileScript = @'
+          [CmdletBinding()]
+          param(
+              [string]$GameExe,
+              [ValidateRange(0,256)][int]$Jobs = 0,
+              [ValidateRange(0,64)][int]$PipelineJobs = 0,
+              [switch]$SkipPipelines,
+              [switch]$DryRun,
+              [switch]$NoPause
+          )
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $OutputEncoding = [Console]::OutputEncoding
+          $root = $PSScriptRoot
+          $exe = Join-Path $root 'victory.exe'
+          $log = $null
+          $mutex = $null
+          $owns = $false
+          $exitCode = 1
+          function Say([string]$Text) {
+              Write-Host $Text
+              if ($script:log) { Add-Content -LiteralPath $script:log -Value $Text -Encoding UTF8 }
+          }
+          function ActiveTitle {
+              @(Get-Process -Name victory -ErrorAction SilentlyContinue | Where-Object {
+                  try { [string]::Equals($_.Path, $script:exe, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+              })
+          }
+          function RunTool([string[]]$ToolArguments) {
+              Say ('> victory.exe ' + (($ToolArguments | ForEach-Object { '"' + $_ + '"' }) -join ' '))
+              $lines = [Collections.Generic.List[string]]::new()
+              $previousPreference = $ErrorActionPreference
+              try {
+                  $ErrorActionPreference = 'Continue'
+                  Push-Location -LiteralPath $script:root
+                  & $script:exe @ToolArguments 2>&1 | ForEach-Object {
+                      $text = $_.ToString()
+                      Say $text
+                      $lines.Add($text)
+                  }
+                  $result = $LASTEXITCODE
+              } finally { Pop-Location; $ErrorActionPreference = $previousPreference }
+              if ($result -ne 0) { throw "victory.exe returned $result; see $script:log" }
+              return ,$lines
+          }
+          try {
+              if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'victory.exe must be beside this script.' }
+              $preset = Get-Content -LiteralPath (Join-Path $root 'RUNTIME-PRESET.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+              foreach ($entry in $preset.environment.PSObject.Properties) {
+                  if ($entry.Name -notmatch '^VICTORY_[A-Z0-9_]+$') { throw 'Invalid runtime preset key.' }
+                  [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value, 'Process')
+              }
+              foreach ($name in $preset.clear_environment) {
+                  if ($name -notmatch '^VICTORY_[A-Z0-9_]+$') { throw 'Invalid runtime preset key.' }
+                  [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+              }
+              $env:VICTORY_CACHE_DIR = Join-Path $root 'cache'
+              $env:VICTORY_DATA_DIR = Join-Path $root 'data'
+              $env:VICTORY_WARM_SECONDS = $null
+              Say '=== cool_fox shader and pipeline precompile / 着色器与管线预编译 ==='
+              Say ('Preset / 预设: ' + $preset.name)
+              Say ('Cache / 缓存: ' + $env:VICTORY_CACHE_DIR)
+              Say 'GPU capabilities are detected by victory.exe, not hardcoded. / 程序自动探测真实显卡。'
+              if (-not $GameExe -and $env:VICTORY_GAME_DIR) { $GameExe = Join-Path $env:VICTORY_GAME_DIR 'game_scarlett_master.exe' }
+              if (-not $GameExe -and -not $DryRun) { $GameExe = Read-Host 'Full path to game EXE / 输入或粘贴游戏主程序完整路径' }
+              if ($GameExe) {
+                  $GameExe = $GameExe.Trim().Trim('"')
+                  if (-not (Test-Path -LiteralPath $GameExe -PathType Leaf)) { throw "Game EXE not found: $GameExe" }
+                  $GameExe = (Get-Item -LiteralPath $GameExe).FullName
+                  $gameRoot = [IO.Path]::GetDirectoryName($GameExe)
+                  $archive = Join-Path $gameRoot 'shaders.rpf'
+                  if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Shader archive not found: $archive" }
+                  $env:VICTORY_GAME_DIR = $gameRoot
+              } else {
+                  $archive = '<game folder>\shaders.rpf'
+                  $GameExe = '<game folder>\game_scarlett_master.exe'
+              }
+              if (-not $DryRun) {
+                  $hash = [Security.Cryptography.SHA256]::Create()
+                  try { $id = [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant()))).Replace('-','') } finally { $hash.Dispose() }
+                  $mutex = [Threading.Mutex]::new($false, ('Local\CoolFoxShaderWarmup_' + $id))
+                  try { $owns = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owns = $true }
+                  if (-not $owns) { throw 'Another precompile script is already running in this folder.' }
+                  if (@(ActiveTitle).Count -gt 0) {
+                      Say 'Waiting for the game to exit; no process will be killed. / 请正常退出游戏，本窗口会等待。'
+                      while (@(ActiveTitle).Count -gt 0) { Start-Sleep -Seconds 3 }
+                  }
+              }
+              $cores = [Math]::Max(1, [int]((Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum))
+              $free = [double](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB / 1GB
+              # Estimates rather than hard memory guarantees. Avoid paging on a busy PC.
+              $memoryJobs = [Math]::Max(1,[int][Math]::Floor(($free-3.0)/0.75))
+              $wanted = if ($Jobs) { $Jobs } else { $cores }
+              $threads = [Math]::Max(1,[Math]::Min($cores,[Math]::Min($wanted,$memoryJobs)))
+              Say ('CPU workers / CPU线程: {0}/{1}; free RAM / 可用内存: {2:N1} GiB' -f $threads,$cores,$free)
+              if ($DryRun) {
+                  Say ('[DRY RUN] victory.exe shaders "{0}" "{1}" --jobs {2}' -f $archive,$GameExe,$threads)
+                  if (-not $SkipPipelines) { Say '[DRY RUN] Then victory.exe warm --jobs <memory-aware worker count>; all recorded pipelines, no --used filter.' }
+                  Say '[DRY RUN OK] No game launched, no shader cache changed. / 检查通过，未启动游戏或修改缓存。'
+                  $exitCode = 0
+              } else {
+                  if ($free -lt 3.75) { throw 'Less than 3.75 GiB free RAM; close other applications and retry.' }
+                  $logs = Join-Path $root 'logs'
+                  [void](New-Item -ItemType Directory -Path $logs -Force)
+                  $log = Join-Path $logs ('shader-precompile-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.log')
+                  Say ('Started / 开始: {0}; log / 日志: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$log)
+                  Say ('Preset={0}; workers={1}; cache={2}' -f $preset.name,$threads,$env:VICTORY_CACHE_DIR)
+                  Say '[1/2] Translating every discovered shader; cached entries are reused. / 遍历全部着色器并复用缓存。'
+                  $timer = [Diagnostics.Stopwatch]::StartNew()
+                  $output = RunTool -ToolArguments @('shaders',$archive,$GameExe,'--jobs',[string]$threads)
+                  $summary = @($output | Where-Object { $_ -match '^\d+ shaders in the cache, \d+ do not translate, ' })
+                  if ($summary.Count -ne 1) { throw 'Missing shader result summary; this run cannot be verified.' }
+                  if ($summary[0] -notmatch '^(?<good>\d+) shaders in the cache, (?<bad>\d+) do not translate, ') { throw 'Unexpected summary.' }
+                  $good = [long]$Matches.good; $bad = [long]$Matches.bad
+                  if ($good + $bad -eq 0) { throw 'No shaders found in these inputs.' }
+                  $exitCode = if ($bad -gt 0) { 2 } else { 0 }
+                  if ($bad -gt 0) { Say 'Some shaders were not translated. Exact grouped reasons are in the output/log. / 部分翻译失败，具体原因已记录。' }
+                  $known = Join-Path $env:VICTORY_CACHE_DIR 'pipelines\known-pipelines.bin'
+                  $knownShaders = Join-Path $env:VICTORY_CACHE_DIR 'pipelines\known-shaders.bin'
+                  if ($SkipPipelines) {
+                      Say '[2/2] Pipeline warmup skipped by request. / 已按参数跳过管线预热。'
+                  } elseif ((Test-Path -LiteralPath $known -PathType Leaf) -and (Test-Path -LiteralPath $knownShaders -PathType Leaf) -and (Get-Item -LiteralPath $known).Length -gt 0 -and (Get-Item -LiteralPath $knownShaders).Length -gt 0) {
+                      $free = [double](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB / 1GB
+                      if ($free -lt 4.5) { throw 'Shader phase saved; less than 4.5 GiB free for GPU pipeline warmup. Free memory and rerun.' }
+                      $defaultPipelineJobs = [Math]::Max(1,[int][Math]::Floor($cores*2/3))
+                      $wanted = if ($PipelineJobs) { $PipelineJobs } else { $defaultPipelineJobs }
+                      $pipelineWorkers = [Math]::Max(1,[Math]::Min(8,[Math]::Min($wanted,[int][Math]::Floor(($free-3.0)/1.5))))
+                      Say ('[2/2] Warming all recorded GPU pipelines, {0} processes. / 预热全部已记录的GPU管线，{0}个进程。' -f $pipelineWorkers)
+                      $pipelineOutput = RunTool -ToolArguments @('warm','--jobs',[string]$pipelineWorkers)
+                      $pipelineSummary = @($pipelineOutput | Where-Object { $_ -match '^\d+ made in .+ \((?<refused>\d+) have no host pipeline, (?<crashed>\d+) ended their process\);' })
+                      if ($pipelineSummary.Count -ne 1) { throw 'Missing pipeline result summary.' }
+                      [void]($pipelineSummary[0] -match '\((?<refused>\d+) have no host pipeline, (?<crashed>\d+) ended their process\)')
+                      if ([long]$Matches.refused -gt 0 -or [long]$Matches.crashed -gt 0) { $exitCode = 2; Say 'Some pipelines failed or their workers ended; review the log and cache/pipelines/warm-bad.txt.' }
+                  } else {
+                      Say '[2/2] No recorded pipelines yet. Run Record-Pipelines.bat once, enter the game, exit normally, then run this script again.'
+                      Say '还没有管线记录：先用 Record-Pipelines.bat 进入游戏场景并正常退出，再执行本脚本。首次无法凭空生成从未记录过的GPU管线。'
+                  }
+                  $timer.Stop()
+                  Say ('Finished / 结束: {0}; elapsed / 用时: {1:N1} min; result / 状态: {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$timer.Elapsed.TotalMinutes,$exitCode)
+                  Say 'Shader compilation does not guarantee 30 FPS or fix upstream rendering errors. / 预编译不能保证稳定30帧或修复上游渲染错误。'
+              }
+          } catch {
+              Write-Host ('[ERROR / 错误] ' + $_.Exception.Message) -ForegroundColor Red
+              if ($log) { Add-Content -LiteralPath $log -Value $_.Exception.ToString() -Encoding UTF8 -ErrorAction SilentlyContinue }
+              $exitCode = 1
+          } finally {
+              if ($owns -and $null -ne $mutex) { $mutex.ReleaseMutex() }
+              if ($null -ne $mutex) { $mutex.Dispose() }
+              if (-not $DryRun -and -not $NoPause) { [void](Read-Host 'Press Enter to close / 按回车关闭') }
+          }
+          exit $exitCode
+          '@
+              [IO.File]::WriteAllText((Join-Path $root 'Precompile-Shaders.ps1'), $precompileScript, [Text.UTF8Encoding]::new($true))
+              $precompileBat = @'
+          @echo off
+          setlocal EnableExtensions DisableDelayedExpansion
+          chcp 65001 >nul
+          set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+          if exist "%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe" set "PS=%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+          "%PS%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Precompile-Shaders.ps1" %*
+          exit /b %ERRORLEVEL%
+          '@
+              [IO.File]::WriteAllText((Join-Path $root 'Precompile-Shaders.bat'), ($precompileBat -replace '\r?\n', [Environment]::NewLine), [Text.Encoding]::ASCII)
+              $recordBat = @'
+          @echo off
+          setlocal EnableExtensions DisableDelayedExpansion
+          set "VICTORY_PIPELINE_BOOK=1"
+          echo Recording pipelines for later offline warmup. Exit the game normally when finished.
+          call "%~dp0Launch.bat" %*
+          exit /b %ERRORLEVEL%
+          '@
+              [IO.File]::WriteAllText((Join-Path $root 'Record-Pipelines.bat'), ($recordBat -replace '\r?\n', [Environment]::NewLine), [Text.Encoding]::ASCII)
+          }
           $instructions = @'
           Extract the entire archive before use. Do not run directly inside the ZIP.
           Open Launch.bat to choose or enter the game's main EXE, or drag its EXE onto Launch.bat.
@@ -333,6 +531,10 @@ jobs:
           Compilation and CLI/ZIP checks do not verify rendering, performance or gameplay.
           See README.md for the original project's requirements and known limitations.
           '@
+          if ($repo -ceq 'carlm125/cool_fox') {
+              $instructions += [Environment]::NewLine + 'cool_fox: Launch.bat uses the upstream pareto-residency / Series S preset. Run Precompile-Shaders.bat to translate shaders, then warm all recorded GPU pipelines. If no pipeline history exists, use Record-Pipelines.bat once and rerun precompile. Keep both precompile files beside victory.exe. See PERFORMANCE.md and the builder README for memory requirements and limitations.'
+              [IO.File]::AppendAllText((Join-Path $root 'PERFORMANCE.md'), ([Environment]::NewLine + 'Shader warmup / 着色器预编译: Precompile-Shaders.bat. Pipeline collection / 管线记录: Record-Pipelines.bat (optional; normal launches do not force recording). Actual GPU capabilities are auto-detected; local caches are never included in releases. 首次没有管线历史时，先记录游戏场景再预热，不能凭空生成全部GPU管线。'), $utf8)
+          }
           [System.IO.File]::WriteAllText((Join-Path $root 'START-HERE.txt'), $instructions, $utf8)
           & git archive --format=zip "--output=$(Join-Path $root 'source.zip')" HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
@@ -355,6 +557,10 @@ jobs:
                   @{ url = 'https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip'; sha256 = 'ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1' }
                   @{ url = 'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/1.620.2/microsoft.direct3d.d3d12.1.620.2.nupkg'; sha256 = '70489669c2bbeaf318b62d72b0ac3e753d521387bfc848c9763791c4e920bfcc' }
               ) } else { @() })
+              shader_precompile = $(if ($repo -ceq 'carlm125/cool_fox') { [ordered]@{
+                  script = 'Precompile-Shaders.bat'; shader_command = 'shaders'; pipeline_command = 'warm'
+                  automatic_gpu_detection = $true; runtime_preset = $runtimePreset.name; pipeline_recording = 'Record-Pipelines.bat'
+              } } else { $null })
               runtime_preset = $runtimePreset
               gameplay_tested = $false
           }
@@ -389,7 +595,18 @@ jobs:
               }
               $packedPreset = Get-Content -LiteralPath (Join-Path $extracted 'RUNTIME-PRESET.json') -Raw | ConvertFrom-Json
               if ($packedPreset.name -cne $runtimePreset.name -or $packedPreset.reference_sha -cne $runtimePreset.reference_sha) { throw 'Packed runtime preset mismatch.' }
-              Write-Host "Verified runtime preset: $($runtimePreset.name); $($runtimeEnv.Count) variables; Series X"
+              Write-Host "Verified runtime preset: $($runtimePreset.name); $($runtimeEnv.Count) variables; $($runtimePreset.extra_arguments -join ' ')"
+          }
+          if ($repo -ceq 'carlm125/cool_fox') {
+              foreach ($command in @('shaders', 'warm')) {
+                  & (Join-Path $extracted $binaryName) $command --help
+                  if ($LASTEXITCODE -ne 0) { throw "Upstream precompile command unavailable: $command" }
+              }
+              $scriptTokens = $null; $scriptErrors = $null
+              [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $extracted 'Precompile-Shaders.ps1'), [ref]$scriptTokens, [ref]$scriptErrors)
+              if ($scriptErrors.Count -ne 0) { throw ('Precompile script syntax error: ' + ($scriptErrors -join '; ')) }
+              & (Join-Path $extracted 'Precompile-Shaders.bat') -DryRun -NoPause
+              if ($LASTEXITCODE -ne 0) { throw 'Packaged precompile script dry-run failed.' }
           }
           $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           [System.IO.File]::WriteAllText(($zip + '.sha256'), "$zipHash  $zipName", $utf8)

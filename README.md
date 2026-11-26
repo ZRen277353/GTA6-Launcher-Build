@@ -10,6 +10,7 @@ A workflow-only repository for building the latest public upstream Windows x64 l
 
 | Upstream / 原仓库 | Notes / 说明 |
 | --- | --- |
+| [carlm125/cool_fox](https://github.com/carlm125/cool_fox) | Optimized Release with its exact upstream RTX pareto-residency / Series S preset; includes shader and recorded-pipeline precompile scripts. / 最高优化编译，使用上游RTX性能预设，附着色器及已记录管线的一键预编译。 |
 | [avatarmanz/VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX) | Added from PortWatch's public race; uses the exact source's official fast launch preset. AMD tuning; 64 GB RAM recommended upstream. / 新增榜单项目，提取官方性能启动预设，主要针对AMD。 |
 | [DexNom/VIctory](https://github.com/DexNom/VIctory) | Added from PortWatch's public race; verifies format tables, builds all three executables. Default BAT uses the README no-RT path. / 新增榜单项目，含三个程序及格式表校验，默认关闭光追。 |
 | [Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD) | AMD-oriented fork / 面向AMD的分支 |
@@ -94,3 +95,15 @@ No Rust or full Windows SDK is required to use the packages. You still need the 
 All launcher code belongs to its original authors and retains its upstream license. VIctory variants use GPL-3.0-or-later; XCL uses GPL-2.0-only. Microsoft runtime files retain their notices. PortWatch rankings and author reports help choose projects; they are not a performance guarantee by this builder.
 
 所有启动器代码属于原作者并遵循上游许可证，微软运行库保留独立声明。榜单与作者实测用于选项目，不代表本编译仓库保证相同帧率或稳定性。
+
+## cool_fox shader precompile / 着色器预编译
+
+Extract the complete `carlm125/cool_fox/` folder. Run **Precompile-Shaders.bat**, or drag your game EXE onto it. It applies the same preset and local `cache/` as Launch.bat, translates all shaders discovered in `shaders.rpf` and the game EXE using `victory shaders`, then runs `victory warm` for **all recorded pipelines**. The executable queries your actual GPU; no old-fork wave or descriptor limits are hardcoded. Shader workers scale up to the logical CPU count with a free-RAM estimate; pipeline processes have a more conservative memory-aware cap of 8. This is a throughput-oriented default, not a measured proof of globally optimal settings. Logs are saved in `logs/`. Exit code 2 indicates partial shader/pipeline failure; exact grouped errors remain visible.
+
+完整解压后，双击 **Precompile-Shaders.bat** 或把游戏EXE拖到它上面。脚本沿用 Launch.bat 的性能预设和本地缓存，先遍历 `shaders.rpf` 及游戏EXE中的着色器，再预热全部已记录GPU管线。程序自动探测显卡，不硬编码旧分支的GPU参数。按CPU线程数和可用内存估算并行度；GPU管线进程更保守、最多8个，避免盲目占满内存。日志保存在 `logs/`，部分失败返回2并保留具体原因。
+
+GPU pipelines require state recorded during actual gameplay: if none exists, launch once through **Record-Pipelines.bat**, enter the desired scenes, exit normally, and rerun Precompile-Shaders.bat. Normal Launch.bat does not force this extra recording overhead. Never use someone else's game-derived caches. Driver/translator changes can require another warmup; compilation cannot generate an unobserved pipeline, fix unsupported shaders, or guarantee 30 FPS. This fork's upstream AMD baseline recommends 64 GB RAM; using an RTX-oriented preset does not guarantee it fits 32 GB in every scene.
+
+GPU管线需要游戏实际记录：首次提示没有记录时，先用 **Record-Pipelines.bat** 进入所需场景并正常退出，再执行预编译。正常 Launch.bat 不强制增加管线记录开销。不要使用他人游戏衍生缓存。更换驱动或翻译器后可再次执行；无法提前生成从未记录的管线，不能修复未支持的着色器或保证30帧。上游AMD基线建议64GB内存，RTX预设也不代表所有场景都能在32GB内存下正常运行。
+
+Optional / 可选: `Precompile-Shaders.bat -Jobs 20 -PipelineJobs 4`, `-SkipPipelines`, or `-DryRun -NoPause` (validation only, no cache changes). No game assets or GPU-specific caches are built or published by CI.
