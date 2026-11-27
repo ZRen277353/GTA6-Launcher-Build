@@ -137,10 +137,13 @@ jobs:
                   env = dict(kwargs.get('env', os.environ))
                   flags = env.get('CARGO_ENCODED_RUSTFLAGS', '').split('\x1f')
                   flags = [f for f in flags if f]
-                  flags += ['-Ctarget-feature=+crt-static', '-Ctarget-cpu=' + cpu]
+                  frontend = Path(kwargs.get('cwd', root)).resolve() == root
+                  # src/simd.rs explicitly imports ucrt; mixing static/dynamic UCRT causes LNK2005.
+                  crt = '-crt-static' if frontend else '+crt-static'
+                  flags += ['-Ctarget-feature=' + crt, '-Ctarget-cpu=' + cpu]
                   env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(flags)
                   kwargs['env'] = env
-                  event = dict(command=argv, rust_toolchain=channel, encoded_rustflags=flags,
+                  event = dict(command=argv, rust_toolchain=channel, rust_crt='dynamic' if frontend else 'static', encoded_rustflags=flags,
                                release_env={k: env[k] for k in ('CARGO_PROFILE_RELEASE_OPT_LEVEL', 'CARGO_PROFILE_RELEASE_LTO', 'CARGO_PROFILE_RELEASE_CODEGEN_UNITS')})
                   print('Optimized upstream build:', json.dumps(event), flush=True)
                   result = original_run(args, *positional, **kwargs)
@@ -774,7 +777,8 @@ jobs:
           GUI settings may be stored in AppData/Kelvaroq, as designed upstream; not all user data is portable.
           native/build.json records the upstream-PINNED engine SHA, patched tree and patch hashes.
           sources/native.zip is that exact patched backend; source.zip is the Kelvaroq frontend source.
-          COMPILER-RECEIPT.json records effective CPU/static-CRT flags, preserving upstream remap flags.
+          COMPILER-RECEIPT.json records effective CPU/CRT flags, preserving upstream remap flags.
+          The native engine uses static CRT; the frontend SIMD DLL imports dynamic UCRT by upstream design.
           See README.md and notices/ for requirements, limitations and licenses. No game files are included.
           '@
           } elseif ($isAnyXboxX) {
@@ -812,8 +816,8 @@ jobs:
               compiled_started_utc = $env:COMPILE_STARTED_UTC; compiled_utc = $env:COMPILED_UTC
               compiled_beijing = [DateTimeOffset]::Parse($env:COMPILED_UTC).ToOffset([TimeSpan]::FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss 'UTC+08:00'")
               built_utc = [DateTime]::UtcNow.ToString('o'); binary = $binaryName; binary_sha256 = $binaryHash
-              profile = 'release'; target = 'x86_64-pc-windows-msvc'; crt = 'static'
-              optimization = [ordered]@{ opt_level = 3; lto = 'fat'; codegen_units = 1; cpu_target = $env:CPU_TARGET; diagnostics = $isAnyXboxX; diagnostics_reason = $(if ($isAnyXboxX) { 'upstream-required' } else { $null }); rustflags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS }
+              profile = 'release'; target = 'x86_64-pc-windows-msvc'; crt = $(if ($isKelvaroq) { 'mixed: native static; frontend dynamic UCRT required upstream' } else { 'static' })
+              optimization = [ordered]@{ opt_level = 3; lto = 'fat'; codegen_units = 1; cpu_target = $env:CPU_TARGET; diagnostics = $isAnyXboxX; diagnostics_reason = $(if ($isAnyXboxX) { 'upstream-required' } else { $null }); rustflags = $(if ($isKelvaroq) { '-C target-feature=-crt-static -C target-cpu=' + $env:CPU_TARGET + '; native engine: +crt-static; see compiler_receipt' } else { $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS }) }
               format_table_sha256 = $(if ($repo -ceq 'DexNom/VIctory') { (Get-FileHash -LiteralPath 'crates/victory-formats/src/bcpack-tables.bin' -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
               dxc = $(if ($isXcl) { 'v1.9.2609' } else { $null })
               agility = $(if ($isXcl) { '1.620.2' } else { $null })
