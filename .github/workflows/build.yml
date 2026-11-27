@@ -18,7 +18,7 @@ on:
           - Belobug/VIctory-Belobug-AMD
           - DexNom/VIctory
           - avatarmanz/VIctory-7900XTX
-          - carlm125/cool_fox
+          - DoubleGhosty/cool_fox
           - stellarr-studio/kelvaroq
           - LooperSalty/AnyXboxX
           - trustno1-coder/VIctory-NVIDIA
@@ -50,7 +50,7 @@ jobs:
         shell: python
         run: |
           import json, os
-          projects = ['Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX', 'carlm125/cool_fox', 'stellarr-studio/kelvaroq', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA']
+          projects = ['Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX', 'DoubleGhosty/cool_fox', 'stellarr-studio/kelvaroq', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA']
           selected = os.environ['PROJECT']
           if selected != 'all' and selected not in projects:
               raise SystemExit('Unsupported upstream repository')

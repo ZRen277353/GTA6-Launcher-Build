@@ -13,7 +13,7 @@ A workflow-only repository for building the latest public upstream Windows x64 l
 | [stellarr-studio/kelvaroq](https://github.com/stellarr-studio/kelvaroq) | Full official portable layout: GUI/CLI, patched native backend, embedded Python/reference runtime and notices. / 完整便携包，包含图形界面、命令行、配套后端及运行库。 |
 | [trustno1-coder/VIctory-NVIDIA](https://github.com/trustno1-coder/VIctory-NVIDIA) | Optimized Release; exact-source NVIDIA settings with the documented Series S / 540p own-upscaler path and offline precompile helpers. / NVIDIA专用预设与官方540p自带升频路径，附纯离线预编译脚本。 |
 | [LooperSalty/AnyXboxX](https://github.com/LooperSalty/AnyXboxX) | Optimized GUI + CLI + exact vendored VIctory; official Windows/NVIDIA profile and offline shader/pipeline script. / GUI、CLI及配套后端，使用上游NVIDIA预设，附离线预编译脚本；diagnostics为上游必需特性。 |
-| [carlm125/cool_fox](https://github.com/carlm125/cool_fox) | Optimized Release with its exact upstream RTX pareto-residency / Series S preset; includes shader and recorded-pipeline precompile scripts. / 最高优化编译，使用上游RTX性能预设，附着色器及已记录管线的一键预编译。 |
+| [DoubleGhosty/cool_fox](https://github.com/DoubleGhosty/cool_fox) | Optimized Release with the exact upstream NVIDIA-safe pareto-residency / Series X preset; includes shader and recorded-pipeline precompile scripts. / 最高优化编译，使用新上游兼顾NVIDIA渲染正确性的Series X预设，附着色器及已记录管线的一键预编译。 |
 | [avatarmanz/VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX) | Added from PortWatch's public race; uses the exact source's official fast launch preset. AMD tuning; 64 GB RAM recommended upstream. / 新增榜单项目，提取官方性能启动预设，主要针对AMD。 |
 | [DexNom/VIctory](https://github.com/DexNom/VIctory) | Added from PortWatch's public race; verifies format tables, builds all three executables. Default BAT uses the README no-RT path. / 新增榜单项目，含三个程序及格式表校验，默认关闭光追。 |
 | [Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD) | AMD-oriented fork / 面向AMD的分支 |
@@ -101,7 +101,11 @@ All launcher code belongs to its original authors and retains its upstream licen
 
 ## cool_fox shader precompile / 着色器预编译
 
-Extract the complete `carlm125/cool_fox/` folder. Run **Precompile-Shaders.bat**, or drag your game EXE onto it. It applies the same preset and local `cache/` as Launch.bat, translates all shaders discovered in `shaders.rpf` and the game EXE using `victory shaders`, then runs `victory warm` for **all recorded pipelines**. The executable queries your actual GPU; no old-fork wave or descriptor limits are hardcoded. Shader workers scale up to the logical CPU count with a free-RAM estimate; pipeline processes have a more conservative memory-aware cap of 8. This is a throughput-oriented default, not a measured proof of globally optimal settings. Logs are saved in `logs/`. Exit code 2 indicates partial shader/pipeline failure; exact grouped errors remain visible.
+The source is now `DoubleGhosty/cool_fox` (replacing `carlm125/cool_fox`). Every build resolves the latest default-branch commit of the new repository. `Launch.bat` follows its reviewed `Play-VIctory.cmd`: Series X, `VICTORY_THIN=0`, `VICTORY_JOIN_PARTS=0`, `VICTORY_AMBIENT=constant:0.8`, renderer ports 6/7 on and ports 1/5 off. The old Series S / asynchronous NVIDIA settings are not carried forward.
+
+源码已从原作者旧地址切换为 `DoubleGhosty/cool_fox`；每次手动编译都重新解析新仓库默认分支的最新提交。启动参数依据新上游脚本，采用Series X，关闭上游指出会导致NVIDIA人物皮肤缺失/视频重复帧的异步路径；不保证固定帧率。已有本地安装不会被工作流自动覆盖。
+
+Extract the complete `DoubleGhosty/cool_fox/` folder. Run **Precompile-Shaders.bat**, or drag your game EXE onto it. It applies the same preset and local `cache/` as Launch.bat, translates all shaders discovered in `shaders.rpf` and the game EXE using `victory shaders`, then runs `victory warm` for **all recorded pipelines**. The executable queries your actual GPU; no old-fork wave or descriptor limits are hardcoded. Shader workers scale up to the logical CPU count with a free-RAM estimate; pipeline processes have a more conservative memory-aware cap of 8. This is a throughput-oriented default, not a measured proof of globally optimal settings. Logs are saved in `logs/`. Exit code 2 indicates partial shader/pipeline failure; exact grouped errors remain visible.
 
 完整解压后，双击 **Precompile-Shaders.bat** 或把游戏EXE拖到它上面。脚本沿用 Launch.bat 的性能预设和本地缓存，先遍历 `shaders.rpf` 及游戏EXE中的着色器，再预热全部已记录GPU管线。程序自动探测显卡，不硬编码旧分支的GPU参数。按CPU线程数和可用内存估算并行度；GPU管线进程更保守、最多8个，避免盲目占满内存。日志保存在 `logs/`，部分失败返回2并保留具体原因。
 

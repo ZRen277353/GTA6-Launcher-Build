@@ -42,7 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX', 'carlm125/cool_fox', 'stellarr-studio/kelvaroq', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')
+          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX', 'DoubleGhosty/cool_fox', 'stellarr-studio/kelvaroq', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')
           if ($env:UPSTREAM -cnotin $allowed) { throw 'Unsupported upstream repository.' }
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
           if ($env:CPU_TARGET -cnotin @('x86-64-v3', 'x86-64')) { throw 'Unsupported CPU target.' }
@@ -373,26 +373,26 @@ jobs:
               }
               Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'play.upstream.ps1')
               if (Test-Path -LiteralPath 'docs') { Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse }
-          } elseif ($repo -ceq 'carlm125/cool_fox') {
+          } elseif ($repo -ceq 'DoubleGhosty/cool_fox') {
               # Parse safe literal defaults from this exact source; never execute upstream CMD.
               $playPath = 'Play-VIctory.cmd'
               $play = Get-Content -LiteralPath $playPath -Raw
-              foreach ($entry in [regex]::Matches($play, '(?im)^if not defined (VICTORY_[A-Z0-9_]+) set "\1=(?<value>[A-Za-z0-9_.+-]+)"\s*$')) {
+              foreach ($entry in [regex]::Matches($play, '(?im)^if not defined (VICTORY_[A-Z0-9_]+) set "\1=(?<value>[A-Za-z0-9_.:+-]+)"\s*$')) {
                   $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups['value'].Value
               }
-              $quiet = [regex]::Match($play, '(?im)^if not defined VICTORY_LOG if not defined RUST_LOG set "VICTORY_LOG=(?<value>[A-Za-z0-9_.+-]+)"\s*$')
+              $quiet = [regex]::Match($play, '(?im)^if not defined VICTORY_LOG if not defined RUST_LOG set "VICTORY_LOG=(?<value>[A-Za-z0-9_.:+-]+)"\s*$')
               if (-not $quiet.Success) { throw 'Upstream cool_fox logging default changed; review before packaging.' }
               $runtimeEnv['VICTORY_LOG'] = $quiet.Groups['value'].Value
-              if ($runtimeEnv.Count -lt 18 -or $runtimeEnv['VICTORY_THIN'] -cne '1' -or $runtimeEnv['VICTORY_LEVELS_ON_DEMAND'] -cne '1' -or $play -notmatch '--console series-s') {
+              if ($runtimeEnv.Count -lt 26 -or $runtimeEnv['VICTORY_THIN'] -cne '0' -or $runtimeEnv['VICTORY_JOIN_PARTS'] -cne '0' -or $runtimeEnv['VICTORY_AMBIENT'] -cne 'constant:0.8' -or $runtimeEnv['VICTORY_TEXTURE_GUARD'] -cne '0' -or $runtimeEnv['VICTORY_PORT_GUARD'] -cne '1' -or $runtimeEnv['VICTORY_PORT_JOURNAL'] -cne '1' -or $runtimeEnv['VICTORY_PORT_CONSTANTS'] -cne '0' -or $runtimeEnv['VICTORY_PORT_CBV'] -cne '0' -or $runtimeEnv['VICTORY_LIBRARY_STORE_LATER'] -cne '1' -or $runtimeEnv['VICTORY_PIPELINE_WAIT_MS'] -cne '0' -or $runtimeEnv['VICTORY_LEVELS_ON_DEMAND'] -cne '1' -or $play -notmatch '--console series-x') {
                   throw 'Upstream cool_fox performance launcher changed; review the preset before packaging.'
               }
               $runtimePreset = [ordered]@{
-                  name = 'cool-fox-upstream-pareto-residency'; kind = 'runtime-environment'; compile_profile = 'release'
-                  basis = 'Exact source Play-VIctory.cmd pareto-residency defaults, Series S, no diagnostics feature; no unmeasured shader or ray-tracing switches'
+                  name = 'cool-fox-upstream-nvidia-safe-pareto-residency'; kind = 'runtime-environment'; compile_profile = 'release'
+                  basis = 'Exact DoubleGhosty source Play-VIctory.cmd NVIDIA-safe pareto-residency defaults, Series X, synchronous skin/video paths, no diagnostics feature; no unmeasured shader or ray-tracing switches'
                   reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/Play-VIctory.cmd"
                   diagnostics_readme = "https://github.com/$repo/blob/$sha/README.md"
-                  reported_hardware = 'Upstream launcher describes an RTX-tested residency preset; package not benchmarked'
-                  reported_fps = 'No FPS guarantee; README retains AMD measurements and recommends 64 GB RAM for that configuration'
+                  reported_hardware = 'Upstream default supports NVIDIA and AMD; asynchronous skin/video paths and renderer ports 1/5 stay off for NVIDIA correctness; package not benchmarked'
+                  reported_fps = 'No FPS guarantee; upstream reports 5-7 FPS for its texture correctness check and adaptive residency for 16-32 GB systems; package gameplay untested'
               }
               Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'Play-VIctory.upstream.cmd')
               if (Test-Path -LiteralPath 'docs') { Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse }
@@ -481,14 +481,14 @@ jobs:
               if ($isAnyXboxX -or $isNvidia) { $clearEnv = @($clearEnv | Where-Object { $_ -cne 'VICTORY_D3D12_DRED' }); $clearEnv += @('VICTORY_HOST_WAVE', 'VICTORY_HOST_MAX_WAVE', 'VICTORY_VIEW_LIMIT', 'VICTORY_WARM_SECONDS') }
               $runtimePreset.compiled_source_readme = "https://github.com/$repo/blob/$sha/README.md"
               $runtimePreset.environment = $runtimeEnv; $runtimePreset.clear_environment = $clearEnv
-              $console = if ($repo -ceq 'carlm125/cool_fox' -or $isNvidia) { 'series-s' } else { 'series-x' }
-              if ($repo -ceq 'carlm125/cool_fox') { $clearEnv += @('VICTORY_HOST_WAVE', 'VICTORY_HOST_MAX_WAVE', 'VICTORY_VIEW_LIMIT', 'VICTORY_WARM_SECONDS') }
+              $console = if ($isNvidia) { 'series-s' } else { 'series-x' }
+              if ($repo -ceq 'DoubleGhosty/cool_fox') { $clearEnv += @('VICTORY_HOST_WAVE', 'VICTORY_HOST_MAX_WAVE', 'VICTORY_VIEW_LIMIT', 'VICTORY_WARM_SECONDS') }
               $runtimePreset.clear_environment = $clearEnv
               $runtimePreset.extra_arguments = @()
               if (-not $isAnyXboxX) { $runtimePreset.extra_arguments = @('--console', $console) }
               $runtimePreset.gameplay_tested = $false
               foreach ($entry in $runtimeEnv.GetEnumerator()) {
-                  if ($entry.Key -notmatch '^VICTORY_[A-Z0-9_]+$' -or $entry.Value -notmatch '^[A-Za-z0-9_.,+-]+$') { throw 'Unsafe runtime preset literal.' }
+                  if ($entry.Key -notmatch '^VICTORY_[A-Z0-9_]+$' -or $entry.Value -notmatch '^[A-Za-z0-9_.,:+-]+$') { throw 'Unsafe runtime preset literal.' }
               }
               $commands = @('rem Upstream runtime performance preset; see PERFORMANCE.md.')
               $commands += @($runtimeEnv.GetEnumerator() | ForEach-Object { 'set "' + $_.Key + '=' + $_.Value + '"' })
@@ -751,7 +751,7 @@ jobs:
               $launcher = $launcher.Replace('victory.exe" run "%GAME%" --execute', ('victory.exe" run "%GAME%" --execute ' + ($runtimePreset.extra_arguments -join ' ')))
           }
           [System.IO.File]::WriteAllText((Join-Path $root 'Launch.bat'), (($launcher -replace '\r?\n', [Environment]::NewLine) + [Environment]::NewLine), [System.Text.Encoding]::ASCII)
-          if ($repo -cin @('carlm125/cool_fox', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')) {
+          if ($repo -cin @('DoubleGhosty/cool_fox', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')) {
               $precompileScript = @'
           [CmdletBinding()]
           param(
@@ -943,8 +943,8 @@ jobs:
           Compilation and CLI/ZIP checks do not verify rendering, performance or gameplay.
           See README.md for the original project's requirements and known limitations.
           '@
-          if ($repo -ceq 'carlm125/cool_fox') {
-              $instructions += [Environment]::NewLine + 'cool_fox: Launch.bat uses the upstream pareto-residency / Series S preset. Run Precompile-Shaders.bat to translate shaders, then warm all recorded GPU pipelines. If no pipeline history exists, use Record-Pipelines.bat once and rerun precompile. Keep both precompile files beside victory.exe. See PERFORMANCE.md and the builder README for memory requirements and limitations.'
+          if ($repo -ceq 'DoubleGhosty/cool_fox') {
+              $instructions += [Environment]::NewLine + 'cool_fox: Launch.bat uses the DoubleGhosty upstream NVIDIA-safe pareto-residency / Series X preset (THIN=0, JOIN_PARTS=0, constant ambient). Run Precompile-Shaders.bat to translate shaders, then warm all recorded GPU pipelines. If no pipeline history exists, use Record-Pipelines.bat once and rerun precompile. Keep both precompile files beside victory.exe. See PERFORMANCE.md and the builder README for memory requirements and limitations.'
               [IO.File]::AppendAllText((Join-Path $root 'PERFORMANCE.md'), ([Environment]::NewLine + 'Shader warmup / 着色器预编译: Precompile-Shaders.bat. Pipeline collection / 管线记录: Record-Pipelines.bat (optional; normal launches do not force recording). Actual GPU capabilities are auto-detected; local caches are never included in releases. 首次没有管线历史时，先记录游戏场景再预热，不能凭空生成全部GPU管线。'), $utf8)
           }
           if ($isKelvaroq) {
@@ -1035,7 +1035,7 @@ jobs:
                   @{ url = 'https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip'; sha256 = 'ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1' }
                   @{ url = 'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/1.620.2/microsoft.direct3d.d3d12.1.620.2.nupkg'; sha256 = '70489669c2bbeaf318b62d72b0ac3e753d521387bfc848c9763791c4e920bfcc' }
               ) } else { @() })
-              shader_precompile = $(if ($repo -cin @('carlm125/cool_fox', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')) { [ordered]@{
+              shader_precompile = $(if ($repo -cin @('DoubleGhosty/cool_fox', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')) { [ordered]@{
                   script = 'Precompile-Shaders.bat'; executable = 'victory.exe'; shader_command = 'shaders'; pipeline_command = 'warm'
                   automatic_gpu_detection = $true; runtime_preset = $runtimePreset.name; pipeline_recording = 'Record-Pipelines.bat'
               } } else { $null })
@@ -1091,7 +1091,7 @@ jobs:
               }
               Write-Host "Verified runtime preset: $($runtimePreset.name); $($runtimeEnv.Count) variables; $($runtimePreset.extra_arguments -join ' ')"
           }
-          if ($repo -cin @('carlm125/cool_fox', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')) {
+          if ($repo -cin @('DoubleGhosty/cool_fox', 'LooperSalty/AnyXboxX', 'trustno1-coder/VIctory-NVIDIA')) {
               foreach ($command in @('shaders', 'warm')) {
                   & (Join-Path $extracted 'victory.exe') $command --help
                   if ($LASTEXITCODE -ne 0) { throw "Upstream precompile command unavailable: $command" }
