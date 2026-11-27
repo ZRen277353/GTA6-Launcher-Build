@@ -114,6 +114,7 @@ jobs:
               # Preserve the official native patches, portable dependencies and reproducible path flags.
               $adapter = @'
           import importlib.util
+          import hashlib
           import json
           import os
           from pathlib import Path
@@ -171,11 +172,16 @@ jobs:
               if not desktop.is_file():
                   # New Cargo adds a package/hash level under build/. Upstream's parents[2]
                   # leaves this successfully compiled companion one directory too high.
-                  candidates = list((root / 'target/package-build').rglob('kelvaroq-desktop.exe'))
-                  if len(candidates) != 1:
-                      raise ValueError('Expected one official compiled desktop companion')
+                  candidates = sorted((root / 'target/package-build').rglob('kelvaroq-desktop.exe'), key=lambda p: len(str(p)))
+                  if not candidates:
+                      raise ValueError('Official desktop companion was not produced')
+                  # build_desktop.py keeps both OUT_DIR/original and its copied companion.
+                  # Multiple copies are valid only when they are byte-identical.
+                  digests = {hashlib.sha256(p.read_bytes()).hexdigest() for p in candidates}
+                  if len(digests) != 1:
+                      raise ValueError('Inconsistent official desktop companion copies: ' + repr(candidates))
                   shutil.copyfile(candidates[0], desktop)
-                  layout_fixes.append(dict(source=str(candidates[0].relative_to(root)), destination=str(desktop.relative_to(root))))
+                  layout_fixes.append(dict(source=str(candidates[0].relative_to(root)), destination=str(desktop.relative_to(root)), sha256=digests.pop()))
               return release
 
           portable.release_build = compatible_release_build
