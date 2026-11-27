@@ -397,49 +397,94 @@ jobs:
               Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'Play-VIctory.upstream.cmd')
               if (Test-Path -LiteralPath 'docs') { Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse }
           } elseif ($isNvidia) {
-              $playPath = 'scripts/play-nvidia.ps1'
+              $entryPath = 'scripts/play-nvidia.ps1'
+              $playPath = $entryPath
               $play = Get-Content -LiteralPath $playPath -Raw
+              # Recognize only the reviewed local forwarding shim; never execute upstream scripts.
+              $shim = [regex]::Replace($play, '(?m)^\s*#[^\r\n]*', '').Trim()
+              $isFoxhound = $shim -cmatch '^&\s+"\$PSScriptRoot\\play-foxhound\.ps1"\s+@args$'
+              if ($isFoxhound) {
+                  $playPath = 'scripts/play-foxhound.ps1'
+                  $play = Get-Content -LiteralPath $playPath -Raw
+              }
               $base = [regex]::Match($play, '(?s)\$settings\s*=\s*@\{(?<body>.*?)\r?\n\}')
               if (-not $base.Success) { throw 'Upstream NVIDIA settings format changed.' }
               $body = [regex]::Replace($base.Groups['body'].Value, '(?m)#[^\r\n]*', '')
               $literal = "(VICTORY_[A-Z0-9_]+)\s*=\s*'([A-Za-z0-9_.,+-]+)'"
-              foreach ($entry in [regex]::Matches($body, $literal)) { $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value }
+              foreach ($entry in [regex]::Matches($body, $literal)) {
+                  $key = $entry.Groups[1].Value
+                  if ($runtimeEnv.Contains($key)) { throw "Duplicate NVIDIA runtime key: $key" }
+                  $runtimeEnv[$key] = $entry.Groups[2].Value
+              }
               if ([regex]::Replace([regex]::Replace($body, $literal, ''), '[\s;]', '') -cne '') { throw 'Unrecognized NVIDIA runtime expression.' }
-              if ($runtimeEnv.Count -lt 25 -or $runtimeEnv['VICTORY_DYNAMIC_SLOTS'] -cne '524288' -or $runtimeEnv['VICTORY_D3D12_DRED'] -cne 'light' -or $play -notmatch "'series-s'" -or $play -notmatch '\$ram -lt 24GB') { throw 'NVIDIA performance launcher changed; review before packaging.' }
-              $quality = [regex]::Match($play, '(?s)if \(\$Quality\) \{(?<body>.*?)\}')
-              if (-not $quality.Success) { throw 'NVIDIA quality settings changed.' }
-              $qualityEnv = [ordered]@{}
-              foreach ($entry in [regex]::Matches($quality.Groups['body'].Value, "\$" + "settings\.(VICTORY_[A-Z0-9_]+)\s*=\s*'([A-Za-z0-9_.,+-]+)'")) { $qualityEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value }
-              if ($qualityEnv.Count -notin @(2,3) -or $qualityEnv['VICTORY_RELAY'] -cne '1' -or $qualityEnv['VICTORY_CARD_STEPS'] -cne '0') { throw 'NVIDIA quality overrides changed.' }
-              $usesRayFilter = $play -match '\$settings\.VICTORY_SKIP_PIPELINES = \(Get-Content \$rtList -Raw\)\.Trim\(\)'
-              $environmentFiles = [ordered]@{}
-              if ($usesRayFilter) {
-                  $rtPath = 'scripts/rt_off_hashes.txt'
-                  $rtHashes = (Get-Content -LiteralPath $rtPath -Raw).Trim()
-                  if ($rtHashes -notmatch '^[0-9a-f]{16}(,[0-9a-f]{16})+$' -or $rtHashes.Length -gt 30000) { throw 'Invalid NVIDIA ray-pass list.' }
-                  $runtimeEnv.Remove('VICTORY_SKIP_PIPELINES')
-                  Copy-Item -LiteralPath $rtPath -Destination (Join-Path $root 'rt_off_hashes.txt')
-                  $environmentFiles['VICTORY_SKIP_PIPELINES'] = [ordered]@{ path = 'rt_off_hashes.txt'; sha256 = (Get-FileHash -LiteralPath $rtPath -Algorithm SHA256).Hash.ToLowerInvariant(); count = $rtHashes.Split(',').Count }
-              } elseif ($play -notmatch "VICTORY_UPSCALE = 'stretch'") { throw 'Unrecognized NVIDIA renderer generation.' }
-              # Both generations document -Resolution 540: half scale with the title's upscaler.
-              # The new native-720p DLSS default needs separately licensed NVIDIA SDK components.
-              if ($play -notmatch "VICTORY_OWN_UPSCALER = '1'" -and $runtimeEnv['VICTORY_OWN_UPSCALER'] -cne '1') { throw 'NVIDIA 540p path changed.' }
-              $runtimeEnv['VICTORY_RENDER_SCALE'] = '0.5'
-              $runtimeEnv['VICTORY_OWN_UPSCALER'] = '1'
-              Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'play-nvidia.upstream.ps1')
-              $runtimePreset = [ordered]@{
-                  name = 'nvidia-upstream-series-s-540p'; kind = 'runtime-environment'; compile_profile = 'release'
-                  basis = 'Exact-source play-nvidia.ps1 literal speed settings with documented -Resolution 540: Series S, half scale, own temporal upscaler. Old revisions retain the official ray-pass filter; newer revisions use the new renderer. No optional NVIDIA SDK/DLSS feature or SDK DLLs are compiled/shipped.'
-                  reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/$playPath"
-                  diagnostics_readme = "https://github.com/$repo/blob/$sha/README.md"
-                  reported_hardware = 'Upstream: RTX 5070 12GB; Ryzen 7 9800X3D; prologue'
-                  reported_fps = 'Upstream measurements depend on source generation and picture settings; this explicit 540p portable configuration is not gameplay benchmarked. No FPS guarantee.'
-                  environment_files = $environmentFiles
-                  nvidia_sdk = 'not included; dlss feature disabled; explicit upstream 540p own-upscaler path'
-                  ray_pass_filter = $usesRayFilter
-                  memory_policy = 'Upstream: 3072 MiB CPU-mapped VRAM windows if physical RAM is below 24 GiB; otherwise runtime default (off)'
-                  quality_environment = $qualityEnv
-                  smooth_motion = 'Uses victory_sm.exe alias by default; copying/renaming does NOT enable NVIDIA App Smooth Motion; configure it yourself or use -NoSmoothMotion'
+              if ($isFoxhound) {
+                  $fpsDefault = [regex]::Match($play, '(?m)\[ValidateRange\(1,\s*1000\)\]\[int\]\$Fps\s*=\s*(?<fps>\d+)\s*,\s*$')
+                  if ($runtimeEnv.Count -lt 35 -or $runtimeEnv['VICTORY_RELAY'] -cne '2' -or $runtimeEnv['VICTORY_SOFT_VIEWS'] -cne 'copies' -or $runtimeEnv['VICTORY_LEVELS_ON_DEMAND'] -cne '0' -or $runtimeEnv['VICTORY_PIPELINE_BOOK'] -cne '1' -or $runtimeEnv['VICTORY_EARLY_DEPTH'] -cne '1' -or -not $fpsDefault.Success -or $play -notmatch 'if \(\$Dlss -ne ''off''\)' -or $play -notmatch '\$console = if \(\$SeriesS\) \{ ''series-s'' \} else \{ ''series-x'' \}' -or $play -notmatch 'Round\(1000000 / \$fpsWanted\)') {
+                      throw 'Upstream foxhound launcher changed; review its SDK-free Series S preset before packaging.'
+                  }
+                  foreach ($key in @('VICTORY_DLSS','VICTORY_FRAMEGEN','VICTORY_NATIVE_1440P','VICTORY_RENDER_1080P','VICTORY_RENDER_SCALE','VICTORY_OWN_UPSCALER')) {
+                      if ($runtimeEnv.Contains($key)) { throw "Unexpected foxhound base setting: $key" }
+                  }
+                  $fps = [int]$fpsDefault.Groups['fps'].Value
+                  if ($fps -lt 1 -or $fps -gt 1000) { throw 'Invalid foxhound default frame rate.' }
+                  # Documented -SeriesS -Dlss off: native 720p, no legacy 540p flags or external SDK.
+                  $runtimeEnv['VICTORY_FRAME_INTERVAL_US'] = [string][int][math]::Round(1000000 / $fps)
+                  $runtimePreset = [ordered]@{
+                      generation = 'foxhound'; default_resolution = '720'; supported_resolutions = @('720')
+                      low_ram_window_cap = $false; smooth_motion_alias = $false
+                      name = 'nvidia-foxhound-series-s-native720p-no-dlss'; kind = 'runtime-environment'; compile_profile = 'release'
+                      basis = 'Exact-source play-foxhound.ps1 literal defaults with documented -SeriesS -Dlss off: native Series S 720p and upstream default frame interval. No legacy 540p render-scale, quality or RAM-window settings.'
+                      reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/$playPath"
+                      diagnostics_readme = "https://github.com/$repo/blob/$sha/README.md"
+                      upstream_entrypoint = $entryPath; upstream_launcher = $playPath
+                      reported_hardware = 'Upstream foxhound: RTX 4070 SUPER; portable SDK-free Series S path not gameplay benchmarked'
+                      reported_fps = 'No FPS guarantee; upstream DLSS/Frame Generation measurements do not apply to this SDK-free package'
+                      environment_files = [ordered]@{}; ray_pass_filter = $false; quality_environment = [ordered]@{}
+                      nvidia_sdk = 'not bundled; runtime DLSS and frame generation disabled'
+                      memory_policy = 'Exact-source foxhound defaults; no legacy under-24-GiB RAM window cap'
+                      smooth_motion = 'No executable alias; no automatic NVIDIA App profile or frame-generation setup'
+                  }
+                  Copy-Item -LiteralPath $entryPath -Destination (Join-Path $root 'play-nvidia.upstream.ps1')
+                  Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'play-foxhound.upstream.ps1')
+              } else {
+                  if ($runtimeEnv.Count -lt 25 -or $runtimeEnv['VICTORY_DYNAMIC_SLOTS'] -cne '524288' -or $runtimeEnv['VICTORY_D3D12_DRED'] -cne 'light' -or $play -notmatch "'series-s'" -or $play -notmatch '\$ram -lt 24GB') { throw 'NVIDIA performance launcher changed; review before packaging.' }
+                  $quality = [regex]::Match($play, '(?s)if \(\$Quality\) \{(?<body>.*?)\}')
+                  if (-not $quality.Success) { throw 'NVIDIA quality settings changed.' }
+                  $qualityEnv = [ordered]@{}
+                  foreach ($entry in [regex]::Matches($quality.Groups['body'].Value, "\$" + "settings\.(VICTORY_[A-Z0-9_]+)\s*=\s*'([A-Za-z0-9_.,+-]+)'")) { $qualityEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value }
+                  if ($qualityEnv.Count -notin @(2,3) -or $qualityEnv['VICTORY_RELAY'] -cne '1' -or $qualityEnv['VICTORY_CARD_STEPS'] -cne '0') { throw 'NVIDIA quality overrides changed.' }
+                  $usesRayFilter = $play -match '\$settings\.VICTORY_SKIP_PIPELINES = \(Get-Content \$rtList -Raw\)\.Trim\(\)'
+                  $environmentFiles = [ordered]@{}
+                  if ($usesRayFilter) {
+                      $rtPath = 'scripts/rt_off_hashes.txt'
+                      $rtHashes = (Get-Content -LiteralPath $rtPath -Raw).Trim()
+                      if ($rtHashes -notmatch '^[0-9a-f]{16}(,[0-9a-f]{16})+$' -or $rtHashes.Length -gt 30000) { throw 'Invalid NVIDIA ray-pass list.' }
+                      $runtimeEnv.Remove('VICTORY_SKIP_PIPELINES')
+                      Copy-Item -LiteralPath $rtPath -Destination (Join-Path $root 'rt_off_hashes.txt')
+                      $environmentFiles['VICTORY_SKIP_PIPELINES'] = [ordered]@{ path = 'rt_off_hashes.txt'; sha256 = (Get-FileHash -LiteralPath $rtPath -Algorithm SHA256).Hash.ToLowerInvariant(); count = $rtHashes.Split(',').Count }
+                  } elseif ($play -notmatch "VICTORY_UPSCALE = 'stretch'") { throw 'Unrecognized NVIDIA renderer generation.' }
+                  # Both generations document -Resolution 540: half scale with the title's upscaler.
+                  # The new native-720p DLSS default needs separately licensed NVIDIA SDK components.
+                  if ($play -notmatch "VICTORY_OWN_UPSCALER = '1'" -and $runtimeEnv['VICTORY_OWN_UPSCALER'] -cne '1') { throw 'NVIDIA 540p path changed.' }
+                  $runtimeEnv['VICTORY_RENDER_SCALE'] = '0.5'
+                  $runtimeEnv['VICTORY_OWN_UPSCALER'] = '1'
+                  Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'play-nvidia.upstream.ps1')
+                  $runtimePreset = [ordered]@{
+                      generation = 'legacy'; default_resolution = '540'; supported_resolutions = @('480','540','720')
+                      low_ram_window_cap = $true; smooth_motion_alias = $true
+                      name = 'nvidia-upstream-series-s-540p'; kind = 'runtime-environment'; compile_profile = 'release'
+                      basis = 'Exact-source play-nvidia.ps1 literal speed settings with documented -Resolution 540: Series S, half scale, own temporal upscaler. Old revisions retain the official ray-pass filter; newer revisions use the new renderer. No optional NVIDIA SDK/DLSS feature or SDK DLLs are compiled/shipped.'
+                      reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/$playPath"
+                      diagnostics_readme = "https://github.com/$repo/blob/$sha/README.md"
+                      reported_hardware = 'Upstream: RTX 5070 12GB; Ryzen 7 9800X3D; prologue'
+                      reported_fps = 'Upstream measurements depend on source generation and picture settings; this explicit 540p portable configuration is not gameplay benchmarked. No FPS guarantee.'
+                      environment_files = $environmentFiles
+                      nvidia_sdk = 'not included; dlss feature disabled; explicit upstream 540p own-upscaler path'
+                      ray_pass_filter = $usesRayFilter
+                      memory_policy = 'Upstream: 3072 MiB CPU-mapped VRAM windows if physical RAM is below 24 GiB; otherwise runtime default (off)'
+                      quality_environment = $qualityEnv
+                      smooth_motion = 'Uses victory_sm.exe alias by default; copying/renaming does NOT enable NVIDIA App Smooth Motion; configure it yourself or use -NoSmoothMotion'
+                  }
               }
           } elseif ($isAnyXboxX) {
               # Read only literal Rust tuples; reject changed syntax rather than running arbitrary scripts.
@@ -665,7 +710,7 @@ jobs:
               $nvFilterDescription = 'Ray-pass filter: {0} hashes; SHA256={1}' -f $nvFile.count,$nvFile.sha256
           }
           $nvRam = try { (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory } catch { 0 }
-          if ($nvRam -gt 0 -and $nvRam -lt 24GB) { $env:VICTORY_WINDOWS_BAR_MB = '3072' }
+          if ($nvidiaPreset.low_ram_window_cap -and $nvRam -gt 0 -and $nvRam -lt 24GB) { $env:VICTORY_WINDOWS_BAR_MB = '3072' }
           $env:VICTORY_CACHE_DIR = Join-Path $nvRoot 'cache'
           $env:VICTORY_DATA_DIR = Join-Path $nvRoot 'data'
           '@
@@ -675,7 +720,7 @@ jobs:
           param(
               [string]$GameExe,
               [switch]$Quality,
-              [ValidateSet('480','540','720')][string]$Resolution = '540',
+              [ValidateSet('480','540','720')][string]$Resolution,
               [string]$Adapter,
               [uint32]$WindowsBarMB,
               [switch]$NoSmoothMotion,
@@ -689,10 +734,15 @@ jobs:
           $result = 1
           try {
               . (Join-Path $PSScriptRoot 'Apply-NVIDIA-Preset.ps1')
+              if (-not $Resolution) { $Resolution = $nvidiaPreset.default_resolution }
+              if ($Resolution -cnotin $nvidiaPreset.supported_resolutions) { throw "Resolution $Resolution is not documented for this upstream generation. Supported: $($nvidiaPreset.supported_resolutions -join ', ')." }
               if ($Quality) {
+                  if (@($nvidiaPreset.quality_environment.PSObject.Properties).Count -eq 0) { throw 'This upstream generation has no legacy -Quality preset.' }
                   foreach ($entry in $nvidiaPreset.quality_environment.PSObject.Properties) { [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value, 'Process') }
               }
-              $env:VICTORY_RENDER_SCALE = ([int]$Resolution / 1080).ToString('0.####', [Globalization.CultureInfo]::InvariantCulture)
+              if ($nvidiaPreset.generation -ceq 'legacy') { $env:VICTORY_RENDER_SCALE = ([int]$Resolution / 1080).ToString('0.####', [Globalization.CultureInfo]::InvariantCulture) }
+              elseif ($PSBoundParameters.ContainsKey('WindowsBarMB')) { throw 'The legacy RAM-window override is not part of this foxhound preset.' }
+              $useSmoothMotionAlias = $nvidiaPreset.smooth_motion_alias -and -not $NoSmoothMotion
               if ($Adapter) { $env:VICTORY_ADAPTER = $Adapter }
               if ($PSBoundParameters.ContainsKey('WindowsBarMB')) { $env:VICTORY_WINDOWS_BAR_MB = $WindowsBarMB.ToString([Globalization.CultureInfo]::InvariantCulture) }
               if ($RecordPipelines) { $env:VICTORY_PIPELINE_BOOK = '1' }
@@ -714,11 +764,11 @@ jobs:
               } else { $GameExe = '<game folder>\game_scarlett_master.exe' }
               $runArgs = @('run',$GameExe,'--execute','--console','series-s')
               if ($DryRun) {
-                  Write-Host ('[DRY RUN] victory{0}.exe {1}' -f $(if ($NoSmoothMotion) { '' } else { '_sm' }),($runArgs -join ' '))
+                  Write-Host ('[DRY RUN] victory{0}.exe {1}' -f $(if ($useSmoothMotionAlias) { '_sm' } else { '' }),($runArgs -join ' '))
                   Write-Host '[DRY RUN OK] No game launched; no executable copied; no cache changed.'
                   exit 0
               }
-              if (-not $NoSmoothMotion) {
+              if ($useSmoothMotionAlias) {
                   $sm = Join-Path $PSScriptRoot 'victory_sm.exe'
                   if (-not (Test-Path -LiteralPath $sm) -or (Get-FileHash -LiteralPath $sm).Hash -cne (Get-FileHash -LiteralPath $victory).Hash) { Copy-Item -LiteralPath $victory -Destination $sm -Force }
                   $victory = $sm
@@ -990,25 +1040,22 @@ jobs:
           if ($isNvidia) {
               $nvidiaInstructions = @'
 
-          VIctory-NVIDIA: Launch.bat applies exact-source speed settings plus documented -Resolution 540:
-          Series S, 540p internal rendering and own temporal upscaler. Old revisions keep the official
-          ray-pass filter; new revisions use their updated renderer. This lowers image quality;
-          the speed set can still show stretched/jumping bodies and rainbow skin. -Quality uses upstream's
-          quality overrides (slower). Optional Launch.bat flags: -Resolution 480/540/720, -Adapter "5070",
-          -WindowsBarMB 0, -NoSmoothMotion. Launch.bat --print-runtime-preset is safe and does not run the game.
-          The upstream victory_sm.exe alias is refreshed at first launch. This does NOT itself enable NVIDIA
-          App Smooth Motion; configure the NVIDIA driver profile separately or use -NoSmoothMotion.
-          Precompile-Shaders.bat translates shaders.rpf plus the game EXE, then warms all recorded GPU pipelines.
-          It never opens the game. If history is absent, Record-Pipelines.bat deliberately opens the game;
-          visit the desired scenes, exit normally, then rerun precompile. Caches remain local and are not shipped.
-          Launch and precompile share Apply-NVIDIA-Preset.ps1 and cache/. PCs below 24 GiB RAM get upstream's
-          3072 MiB CPU-mapped VRAM window cap; larger PCs leave it off. Default concurrency is memory-aware.
-          Diagnostics retains upstream runtime controls (old ray-pass filter / newer settings menu).
-          The optional dlss compile feature is OFF: no separately licensed NVIDIA SDK/runtime files are bundled.
-          New upstream native-720p DLSS measurements do not apply to this explicit 540p own-upscaler package.
-          Compilation remains optimized Release, O3, fat LTO, one codegen unit, with CPU v3/static CRT by default.
-          No stable 30 FPS, rendering-correctness or crash-free guarantee. Original play-nvidia.upstream.ps1 is
-          for reference: it retains upstream source-tree paths; use Launch.bat for this portable package.
+          VIctory-NVIDIA: Launch.bat and Precompile-Shaders.bat share exact-source settings and cache/.
+          Read RUNTIME-PRESET.json for the upstream generation, source commit and selected runtime path.
+          Foxhound generations use the documented -SeriesS -Dlss off path: native 720p, upstream default
+          frame interval, no old 540p flags, no legacy -Quality override, no old RAM-window heuristic,
+          and no victory_sm.exe alias. -Resolution 720 is accepted; retired 480/540 settings are rejected.
+          Legacy generations keep the documented 540p own-upscaler path, legacy quality/resolution flags,
+          3072-MiB window cap below 24 GiB RAM and optional NVIDIA App alias as recorded in the preset.
+          An executable alias never enables Smooth Motion by itself. No NVIDIA SDK/runtime DLLs are bundled;
+          DLSS and DLSS Frame Generation are not enabled by this package. Their upstream FPS reports do not apply.
+          Precompile-Shaders.bat translates shaders.rpf plus the game EXE, then warms recorded GPU pipelines;
+          it does not start the game. Record-Pipelines.bat intentionally does. No game-derived caches are shipped.
+          Launch.bat --print-runtime-preset and Launch.bat -DryRun -NoPause inspect without starting the game.
+          Compilation remains Release O3, fat LTO, one codegen unit, CPU v3/static CRT by default. Diagnostics
+          retains source-generation-specific controls; it does not mean runtime debug layers are enabled.
+          No stable-FPS, rendering-correctness or crash-free guarantee. Original *.upstream.ps1 files are
+          source references, not portable entrypoints; use Launch.bat. No local Rust build is required.
           '@
               $instructions += [Environment]::NewLine + $nvidiaInstructions
               [IO.File]::AppendAllText((Join-Path $root 'PERFORMANCE.md'), $nvidiaInstructions, $utf8)
@@ -1077,6 +1124,12 @@ jobs:
               $packedPreset = Get-Content -LiteralPath (Join-Path $extracted 'RUNTIME-PRESET.json') -Raw | ConvertFrom-Json
               if ($packedPreset.name -cne $runtimePreset.name -or $packedPreset.reference_sha -cne $runtimePreset.reference_sha) { throw 'Packed runtime preset mismatch.' }
               if ($isNvidia) {
+                  if ($packedPreset.generation -ceq 'foxhound') {
+                      foreach ($key in @('VICTORY_RENDER_SCALE','VICTORY_OWN_UPSCALER','VICTORY_WINDOWS_BAR_MB','VICTORY_DLSS','VICTORY_FRAMEGEN')) {
+                          if ($presetOutput -match ('(?m)^' + [regex]::Escape($key) + '=')) { throw "Unexpected legacy/SDK runtime switch: $key" }
+                      }
+                      if ($packedPreset.default_resolution -cne '720' -or $packedPreset.low_ram_window_cap -or $packedPreset.smooth_motion_alias) { throw 'Foxhound portable defaults mismatch.' }
+                  }
                   if ($packedPreset.ray_pass_filter) {
                       $rtInfo = $packedPreset.environment_files.VICTORY_SKIP_PIPELINES
                       if ($presetOutput -notmatch [regex]::Escape(('Ray-pass filter: {0} hashes; SHA256={1}' -f $rtInfo.count,$rtInfo.sha256))) { throw 'NVIDIA ray-pass filter was not applied.' }

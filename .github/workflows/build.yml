@@ -284,7 +284,7 @@ jobs:
                    f'- Build / 构建记录: {run_url}',
                    f'- Results / 本批结果: **{len(built)} 编译成功 / built; {len(unavailable)} 项目404，无法编译 / unavailable**',
                    f'- Compiler / 编译优化: **Release, opt-level=3, fat LTO, codegen-units=1, {os.environ["CPU_TARGET"]}, static native-engine CRT (Kelvaroq frontend uses required dynamic UCRT); diagnostics off except upstream-required AnyXboxX and NVIDIA runtime controls**',
-                   '- Diagnostics is enabled only for AnyXboxX (upstream compile requirement) and VIctory-NVIDIA (upstream runtime controls); both retain their measured light-DRED setting. All builds use optimized Release, not the diag profile.',
+                   '- Diagnostics is enabled only for AnyXboxX (upstream compile requirement) and VIctory-NVIDIA (upstream runtime controls); runtime controls are selected from each exact source generation (legacy light DRED is not forced onto foxhound). All builds use optimized Release, not the diag profile.',
                    '- 仅AnyXboxX因编译要求、VIctory-NVIDIA因官方运行控制需要保留diagnostics特性；仍使用最高常规优化Release。',
                    '- x86-64-v3 requires AVX2/FMA/BMI2; choose x86-64 when manually triggering for older CPUs. Do not use the CI runner CPU as a native target.',
                    '- x86-64-v3 需要 AVX2/FMA/BMI2；旧CPU手动触发时选择 x86-64。', '']
