@@ -34,7 +34,7 @@ The public, active main-race repositories in the PortWatch data checked on **202
 4. Select **all** for one combined batch, or a single upstream. Choose the CPU target, then start. / 选择全部或单个项目，选择CPU指令集后开始。
 5. Wait for the selected builds and the final **Publish one combined Release / 统一发布** job. Open **Releases** in your own Fork and download the desired ZIP. / 等待编译和统一发布完成，到自己Fork的 **Releases** 下载所需ZIP。
 
-The upstream default-branch HEAD is resolved at build time and checked out by its exact full SHA. The upstream Rust toolchain and Cargo.lock are respected. Dependencies intentionally pinned or vendored by a project remain pinned/vendored: Kelvaroq builds its prescribed VIctory revision plus its ordered patches, and AnyXboxX builds its included third_party/victory, not an unrelated fork HEAD. Upstream changes do not trigger automatic builds: manually run again whenever you want an update.
+The upstream default-branch HEAD is resolved at build time and checked out by its exact full SHA. The upstream Rust toolchain and Cargo.lock are respected. Dependencies intentionally pinned or vendored by a project remain pinned/vendored: Kelvaroq builds its prescribed VIctory revision plus its ordered patches, and AnyXboxX builds its included third_party/victory and checks out its TomBox submodule by the committed SHA, not an unrelated fork HEAD. The submodule source is included as sources/tombox.zip. Upstream changes do not trigger automatic builds: manually run again whenever you want an update.
 
 每个项目在构建时解析上游默认分支HEAD，并按完整SHA精确检出，使用上游指定的Rust工具链及Cargo.lock。项目有意固定或内置的依赖不会擅自升级：Kelvaroq使用其指定的VIctory提交及补丁，AnyXboxX使用自己的内置VIctory；两者后端详情写入清单和包内构建记录。想更新时再次手动触发即可，上游更新不会自动消耗编译额度。
 

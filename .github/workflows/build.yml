@@ -336,6 +336,8 @@ jobs:
                     'Each successful package contains an executable, exact source.zip, license notices, build metadata and checksums. Full Git SHAs are preserved in BUILD-MANIFEST.json and metadata; this page shows 12 characters.',
                     '完整提交号保存在清单和metadata中，页面只显示12位，便于对比。404项目仅有状态记录，不附旧版本程序。',
                     'DexNom includes victory.exe, victory-play.exe and victory-warm.exe; its BAT uses the README no-RT path, including for NVIDIA. Use victory-play.exe explicitly for optional RT/FSR settings.',
+                    'Kelvaroq bundles its official portable runtime and pinned patched engine; Launch.bat opens the GUI, or uses the CLI when given a game path. Upstream settings may use AppData.',
+                    'AnyXboxX bundles CLI, GUI and its exact vendored engine with the pinned TomBox submodule sources. Use Precompile-Shaders.bat then Launch.bat; START-HERE.txt documents the current upstream GUI warm-command mismatch. No local Rust build is needed.',
                     'XCL bundles verified DXC/Agility runtimes; Windows Gaming Services is still required.',
                     'No game files. Compilation, CLI and archive checks do not verify gameplay, rendering correctness, crash freedom or 30 FPS. Shader caches can rebuild after an upstream update.',
                     '不含游戏文件；最高级别编译优化不保证稳定30帧、画面无误或不崩溃。上游更新后可能重建着色器缓存。',
