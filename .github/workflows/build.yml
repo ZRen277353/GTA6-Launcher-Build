@@ -168,7 +168,7 @@ jobs:
                   if not valid_sha(sha):
                       raise ValueError(f'Invalid source SHA: {upstream}')
                   opt = info.get('optimization', {})
-                  diagnostics_reason = {'LooperSalty/AnyXboxX': 'upstream-required', 'trustno1-coder/VIctory-NVIDIA': 'upstream-nvidia-ray-pass-filter'}.get(upstream)
+                  diagnostics_reason = {'LooperSalty/AnyXboxX': 'upstream-required', 'trustno1-coder/VIctory-NVIDIA': 'upstream-nvidia-runtime-preset'}.get(upstream)
                   required_diagnostics = diagnostics_reason is not None
                   if opt.get('diagnostics') is not required_diagnostics or opt.get('diagnostics_reason') != diagnostics_reason:
                       raise ValueError(f'Unexpected diagnostics feature: {upstream}')
@@ -283,9 +283,9 @@ jobs:
                    f'- Release assembled / 发布准备时间: {show(published)}',
                    f'- Build / 构建记录: {run_url}',
                    f'- Results / 本批结果: **{len(built)} 编译成功 / built; {len(unavailable)} 项目404，无法编译 / unavailable**',
-                   f'- Compiler / 编译优化: **Release, opt-level=3, fat LTO, codegen-units=1, {os.environ["CPU_TARGET"]}, static native-engine CRT (Kelvaroq frontend uses required dynamic UCRT); diagnostics off except upstream-required AnyXboxX and NVIDIA ray-pass filtering**',
-                   '- Diagnostics is enabled only for AnyXboxX (upstream compile requirement) and VIctory-NVIDIA (upstream ray-pass skip list); both retain their measured light-DRED setting. All builds use optimized Release, not the diag profile.',
-                   '- 仅AnyXboxX因编译要求、VIctory-NVIDIA因官方光追通道过滤需要保留diagnostics特性；仍使用最高常规优化Release。',
+                   f'- Compiler / 编译优化: **Release, opt-level=3, fat LTO, codegen-units=1, {os.environ["CPU_TARGET"]}, static native-engine CRT (Kelvaroq frontend uses required dynamic UCRT); diagnostics off except upstream-required AnyXboxX and NVIDIA runtime controls**',
+                   '- Diagnostics is enabled only for AnyXboxX (upstream compile requirement) and VIctory-NVIDIA (upstream runtime controls); both retain their measured light-DRED setting. All builds use optimized Release, not the diag profile.',
+                   '- 仅AnyXboxX因编译要求、VIctory-NVIDIA因官方运行控制需要保留diagnostics特性；仍使用最高常规优化Release。',
                    '- x86-64-v3 requires AVX2/FMA/BMI2; choose x86-64 when manually triggering for older CPUs. Do not use the CI runner CPU as a native target.',
                    '- x86-64-v3 需要 AVX2/FMA/BMI2；旧CPU手动触发时选择 x86-64。', '']
           if previous_release:

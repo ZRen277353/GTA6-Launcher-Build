@@ -405,28 +405,38 @@ jobs:
               $literal = "(VICTORY_[A-Z0-9_]+)\s*=\s*'([A-Za-z0-9_.,+-]+)'"
               foreach ($entry in [regex]::Matches($body, $literal)) { $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value }
               if ([regex]::Replace([regex]::Replace($body, $literal, ''), '[\s;]', '') -cne '') { throw 'Unrecognized NVIDIA runtime expression.' }
-              if ($runtimeEnv.Count -lt 30 -or $runtimeEnv['VICTORY_RENDER_SCALE'] -cne '0.5' -or $runtimeEnv['VICTORY_DYNAMIC_SLOTS'] -cne '524288' -or $runtimeEnv['VICTORY_D3D12_DRED'] -cne 'light' -or $play -notmatch "--console', 'series-s'" -or $play -notmatch '\$ram -lt 24GB') { throw 'NVIDIA performance launcher changed; review before packaging.' }
-              $quality = [regex]::Match($play, '(?s)if \(\$Quality\) \{(?<body>.*?)\r?\n\}')
+              if ($runtimeEnv.Count -lt 25 -or $runtimeEnv['VICTORY_DYNAMIC_SLOTS'] -cne '524288' -or $runtimeEnv['VICTORY_D3D12_DRED'] -cne 'light' -or $play -notmatch "'series-s'" -or $play -notmatch '\$ram -lt 24GB') { throw 'NVIDIA performance launcher changed; review before packaging.' }
+              $quality = [regex]::Match($play, '(?s)if \(\$Quality\) \{(?<body>.*?)\}')
               if (-not $quality.Success) { throw 'NVIDIA quality settings changed.' }
               $qualityEnv = [ordered]@{}
               foreach ($entry in [regex]::Matches($quality.Groups['body'].Value, "\$" + "settings\.(VICTORY_[A-Z0-9_]+)\s*=\s*'([A-Za-z0-9_.,+-]+)'")) { $qualityEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value }
-              if ($qualityEnv.Count -ne 3 -or $qualityEnv['VICTORY_TEXTURE_NO_WAIT'] -cne '0') { throw 'NVIDIA quality overrides changed.' }
-              $rtPath = 'scripts/rt_off_hashes.txt'
-              $rtHashes = (Get-Content -LiteralPath $rtPath -Raw).Trim()
-              if ($rtHashes -notmatch '^[0-9a-f]{16}(,[0-9a-f]{16})+$' -or $rtHashes.Length -gt 30000) { throw 'Invalid NVIDIA ray-pass list.' }
-              if ($play -notmatch '\$settings\.VICTORY_SKIP_PIPELINES = \(Get-Content \$rtList -Raw\)\.Trim\(\)') { throw 'NVIDIA ray-pass selection changed.' }
-              # This list exceeds cmd.exe's line limit. Load it directly into the child PS process environment.
-              $runtimeEnv.Remove('VICTORY_SKIP_PIPELINES')
-              Copy-Item -LiteralPath $rtPath -Destination (Join-Path $root 'rt_off_hashes.txt')
+              if ($qualityEnv.Count -notin @(2,3) -or $qualityEnv['VICTORY_RELAY'] -cne '1' -or $qualityEnv['VICTORY_CARD_STEPS'] -cne '0') { throw 'NVIDIA quality overrides changed.' }
+              $usesRayFilter = $play -match '\$settings\.VICTORY_SKIP_PIPELINES = \(Get-Content \$rtList -Raw\)\.Trim\(\)'
+              $environmentFiles = [ordered]@{}
+              if ($usesRayFilter) {
+                  $rtPath = 'scripts/rt_off_hashes.txt'
+                  $rtHashes = (Get-Content -LiteralPath $rtPath -Raw).Trim()
+                  if ($rtHashes -notmatch '^[0-9a-f]{16}(,[0-9a-f]{16})+$' -or $rtHashes.Length -gt 30000) { throw 'Invalid NVIDIA ray-pass list.' }
+                  $runtimeEnv.Remove('VICTORY_SKIP_PIPELINES')
+                  Copy-Item -LiteralPath $rtPath -Destination (Join-Path $root 'rt_off_hashes.txt')
+                  $environmentFiles['VICTORY_SKIP_PIPELINES'] = [ordered]@{ path = 'rt_off_hashes.txt'; sha256 = (Get-FileHash -LiteralPath $rtPath -Algorithm SHA256).Hash.ToLowerInvariant(); count = $rtHashes.Split(',').Count }
+              } elseif ($play -notmatch "VICTORY_UPSCALE = 'stretch'") { throw 'Unrecognized NVIDIA renderer generation.' }
+              # Both generations document -Resolution 540: half scale with the title's upscaler.
+              # The new native-720p DLSS default needs separately licensed NVIDIA SDK components.
+              if ($play -notmatch "VICTORY_OWN_UPSCALER = '1'" -and $runtimeEnv['VICTORY_OWN_UPSCALER'] -cne '1') { throw 'NVIDIA 540p path changed.' }
+              $runtimeEnv['VICTORY_RENDER_SCALE'] = '0.5'
+              $runtimeEnv['VICTORY_OWN_UPSCALER'] = '1'
               Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'play-nvidia.upstream.ps1')
               $runtimePreset = [ordered]@{
                   name = 'nvidia-upstream-series-s-540p'; kind = 'runtime-environment'; compile_profile = 'release'
-                  basis = 'Exact source play-nvidia.ps1 default speed preset; Series S, half scale, own temporal upscaler, official ray-pass filter; diagnostics enables that filter'
+                  basis = 'Exact-source play-nvidia.ps1 literal speed settings with documented -Resolution 540: Series S, half scale, own temporal upscaler. Old revisions retain the official ray-pass filter; newer revisions use the new renderer. No optional NVIDIA SDK/DLSS feature or SDK DLLs are compiled/shipped.'
                   reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/$playPath"
                   diagnostics_readme = "https://github.com/$repo/blob/$sha/README.md"
                   reported_hardware = 'Upstream: RTX 5070 12GB; Ryzen 7 9800X3D; prologue'
-                  reported_fps = 'Upstream reports about 18-22 FPS in the prologue, not a guarantee or a measurement of this package; speed preset can have stretched/jumping bodies and rainbow skin'
-                  environment_files = [ordered]@{ VICTORY_SKIP_PIPELINES = [ordered]@{ path = 'rt_off_hashes.txt'; sha256 = (Get-FileHash -LiteralPath $rtPath -Algorithm SHA256).Hash.ToLowerInvariant(); count = $rtHashes.Split(',').Count } }
+                  reported_fps = 'Upstream measurements depend on source generation and picture settings; this explicit 540p portable configuration is not gameplay benchmarked. No FPS guarantee.'
+                  environment_files = $environmentFiles
+                  nvidia_sdk = 'not included; dlss feature disabled; explicit upstream 540p own-upscaler path'
+                  ray_pass_filter = $usesRayFilter
                   memory_policy = 'Upstream: 3072 MiB CPU-mapped VRAM windows if physical RAM is below 24 GiB; otherwise runtime default (off)'
                   quality_environment = $qualityEnv
                   smooth_motion = 'Uses victory_sm.exe alias by default; copying/renaming does NOT enable NVIDIA App Smooth Motion; configure it yourself or use -NoSmoothMotion'
@@ -491,7 +501,7 @@ jobs:
                   ''
                   'Use Launch.bat, or drag the game EXE onto it, to apply these runtime settings before the game starts.'
                   '通过 Launch.bat 启动或将游戏 EXE 拖到它上面，才能应用运行参数；单独运行 victory.exe 不会自动应用。'
-                  ('Optimized Release: opt-level=3, fat LTO, one codegen unit, static Rust CRT; diagnostics: ' + $(if ($isAnyXboxX) { 'required by upstream' } elseif ($isNvidia) { 'required for upstream NVIDIA ray-pass filter' } else { 'off' }))
+                  ('Optimized Release: opt-level=3, fat LTO, one codegen unit, static Rust CRT; diagnostics: ' + $(if ($isAnyXboxX) { 'required by upstream' } elseif ($isNvidia) { 'required for upstream NVIDIA runtime controls' } else { 'off' }))
                   ('CPU target / CPU 指令集: ' + $env:CPU_TARGET)
                   ('Basis / 来源: ' + $runtimePreset.basis)
                   ('Reference / 参数文档: ' + $runtimePreset.readme)
@@ -642,14 +652,18 @@ jobs:
               if ($nvEntry.Name -notmatch '^VICTORY_[A-Z0-9_]+$' -or [string]$nvEntry.Value -notmatch '^[A-Za-z0-9_.,+-]+$') { throw 'Invalid NVIDIA preset literal.' }
               [Environment]::SetEnvironmentVariable($nvEntry.Name, [string]$nvEntry.Value, 'Process')
           }
-          $nvFile = $nvidiaPreset.environment_files.VICTORY_SKIP_PIPELINES
-          if ($nvFile.path -cne 'rt_off_hashes.txt') { throw 'Unexpected NVIDIA ray-pass file.' }
-          $nvFilePath = Join-Path $nvRoot $nvFile.path
-          if ((Get-FileHash -LiteralPath $nvFilePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $nvFile.sha256) { throw 'NVIDIA ray-pass file checksum mismatch.' }
-          $nvHashes = (Get-Content -LiteralPath $nvFilePath -Raw).Trim()
-          if ($nvHashes -notmatch '^[0-9a-f]{16}(,[0-9a-f]{16})+$' -or $nvHashes.Split(',').Count -ne $nvFile.count -or $nvHashes.Length -gt 30000) { throw 'Invalid NVIDIA ray-pass hashes.' }
-          # Do not route this 17 KB variable through cmd.exe SET (8191-character command limit).
-          $env:VICTORY_SKIP_PIPELINES = $nvHashes
+          $nvFilterDescription = 'Ray-pass filter: not used by this source revision.'
+          if ($nvidiaPreset.ray_pass_filter) {
+              $nvFile = $nvidiaPreset.environment_files.VICTORY_SKIP_PIPELINES
+              if ($nvFile.path -cne 'rt_off_hashes.txt') { throw 'Unexpected NVIDIA ray-pass file.' }
+              $nvFilePath = Join-Path $nvRoot $nvFile.path
+              if ((Get-FileHash -LiteralPath $nvFilePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $nvFile.sha256) { throw 'NVIDIA ray-pass file checksum mismatch.' }
+              $nvHashes = (Get-Content -LiteralPath $nvFilePath -Raw).Trim()
+              if ($nvHashes -notmatch '^[0-9a-f]{16}(,[0-9a-f]{16})+$' -or $nvHashes.Split(',').Count -ne $nvFile.count -or $nvHashes.Length -gt 30000) { throw 'Invalid NVIDIA ray-pass hashes.' }
+              # Do not route this long variable through cmd.exe SET.
+              $env:VICTORY_SKIP_PIPELINES = $nvHashes
+              $nvFilterDescription = 'Ray-pass filter: {0} hashes; SHA256={1}' -f $nvFile.count,$nvFile.sha256
+          }
           $nvRam = try { (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory } catch { 0 }
           if ($nvRam -gt 0 -and $nvRam -lt 24GB) { $env:VICTORY_WINDOWS_BAR_MB = '3072' }
           $env:VICTORY_CACHE_DIR = Join-Path $nvRoot 'cache'
@@ -685,7 +699,7 @@ jobs:
               Write-Host ('Preset: {0}; Series S, internal resolution {1}p; FPS is not guaranteed.' -f $nvidiaPreset.name,$Resolution)
               if ($PrintPreset) {
                   Get-ChildItem Env:VICTORY_* | Where-Object { $_.Name -cne 'VICTORY_SKIP_PIPELINES' } | Sort-Object Name | ForEach-Object { Write-Output ($_.Name + '=' + $_.Value) }
-                  Write-Output ('Ray-pass filter: {0} hashes; SHA256={1}' -f $nvFile.count,$nvFile.sha256)
+                  Write-Output $nvFilterDescription
                   exit 0
               }
               $victory = Join-Path $PSScriptRoot 'victory.exe'
@@ -976,10 +990,11 @@ jobs:
           if ($isNvidia) {
               $nvidiaInstructions = @'
 
-          VIctory-NVIDIA: Launch.bat applies the exact upstream speed preset: Series S, 540p internal rendering,
-          own temporal upscaler, ray-walk misses and the official ray-pass skip list. This lowers image quality;
+          VIctory-NVIDIA: Launch.bat applies exact-source speed settings plus documented -Resolution 540:
+          Series S, 540p internal rendering and own temporal upscaler. Old revisions keep the official
+          ray-pass filter; new revisions use their updated renderer. This lowers image quality;
           the speed set can still show stretched/jumping bodies and rainbow skin. -Quality uses upstream's
-          three safer overrides (slower). Optional Launch.bat flags: -Resolution 480/540/720, -Adapter "5070",
+          quality overrides (slower). Optional Launch.bat flags: -Resolution 480/540/720, -Adapter "5070",
           -WindowsBarMB 0, -NoSmoothMotion. Launch.bat --print-runtime-preset is safe and does not run the game.
           The upstream victory_sm.exe alias is refreshed at first launch. This does NOT itself enable NVIDIA
           App Smooth Motion; configure the NVIDIA driver profile separately or use -NoSmoothMotion.
@@ -988,7 +1003,9 @@ jobs:
           visit the desired scenes, exit normally, then rerun precompile. Caches remain local and are not shipped.
           Launch and precompile share Apply-NVIDIA-Preset.ps1 and cache/. PCs below 24 GiB RAM get upstream's
           3072 MiB CPU-mapped VRAM window cap; larger PCs leave it off. Default concurrency is memory-aware.
-          Diagnostics is enabled ONLY because the official ray-pass filter is gated behind that feature.
+          Diagnostics retains upstream runtime controls (old ray-pass filter / newer settings menu).
+          The optional dlss compile feature is OFF: no separately licensed NVIDIA SDK/runtime files are bundled.
+          New upstream native-720p DLSS measurements do not apply to this explicit 540p own-upscaler package.
           Compilation remains optimized Release, O3, fat LTO, one codegen unit, with CPU v3/static CRT by default.
           No stable 30 FPS, rendering-correctness or crash-free guarantee. Original play-nvidia.upstream.ps1 is
           for reference: it retains upstream source-tree paths; use Launch.bat for this portable package.
@@ -1010,7 +1027,7 @@ jobs:
               compiled_beijing = [DateTimeOffset]::Parse($env:COMPILED_UTC).ToOffset([TimeSpan]::FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss 'UTC+08:00'")
               built_utc = [DateTime]::UtcNow.ToString('o'); binary = $binaryName; binary_sha256 = $binaryHash
               profile = 'release'; target = 'x86_64-pc-windows-msvc'; crt = $(if ($isKelvaroq) { 'mixed: native static; frontend dynamic UCRT required upstream' } else { 'static' })
-              optimization = [ordered]@{ opt_level = 3; lto = 'fat'; codegen_units = 1; cpu_target = $env:CPU_TARGET; diagnostics = ($isAnyXboxX -or $isNvidia); diagnostics_reason = $(if ($isAnyXboxX) { 'upstream-required' } elseif ($isNvidia) { 'upstream-nvidia-ray-pass-filter' } else { $null }); rustflags = $(if ($isKelvaroq) { '-C target-feature=-crt-static -C target-cpu=' + $env:CPU_TARGET + '; native engine: +crt-static; see compiler_receipt' } else { $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS }) }
+              optimization = [ordered]@{ opt_level = 3; lto = 'fat'; codegen_units = 1; cpu_target = $env:CPU_TARGET; diagnostics = ($isAnyXboxX -or $isNvidia); diagnostics_reason = $(if ($isAnyXboxX) { 'upstream-required' } elseif ($isNvidia) { 'upstream-nvidia-runtime-preset' } else { $null }); rustflags = $(if ($isKelvaroq) { '-C target-feature=-crt-static -C target-cpu=' + $env:CPU_TARGET + '; native engine: +crt-static; see compiler_receipt' } else { $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS }) }
               format_table_sha256 = $(if ($repo -ceq 'DexNom/VIctory') { (Get-FileHash -LiteralPath 'crates/victory-formats/src/bcpack-tables.bin' -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
               dxc = $(if ($isXcl) { 'v1.9.2609' } else { $null })
               agility = $(if ($isXcl) { '1.620.2' } else { $null })
@@ -1060,8 +1077,10 @@ jobs:
               $packedPreset = Get-Content -LiteralPath (Join-Path $extracted 'RUNTIME-PRESET.json') -Raw | ConvertFrom-Json
               if ($packedPreset.name -cne $runtimePreset.name -or $packedPreset.reference_sha -cne $runtimePreset.reference_sha) { throw 'Packed runtime preset mismatch.' }
               if ($isNvidia) {
-                  $rtInfo = $packedPreset.environment_files.VICTORY_SKIP_PIPELINES
-                  if ($presetOutput -notmatch [regex]::Escape(('Ray-pass filter: {0} hashes; SHA256={1}' -f $rtInfo.count,$rtInfo.sha256))) { throw 'NVIDIA ray-pass filter was not applied.' }
+                  if ($packedPreset.ray_pass_filter) {
+                      $rtInfo = $packedPreset.environment_files.VICTORY_SKIP_PIPELINES
+                      if ($presetOutput -notmatch [regex]::Escape(('Ray-pass filter: {0} hashes; SHA256={1}' -f $rtInfo.count,$rtInfo.sha256))) { throw 'NVIDIA ray-pass filter was not applied.' }
+                  } elseif ($presetOutput -notmatch 'Ray-pass filter: not used by this source revision.') { throw 'Unexpected NVIDIA filter state.' }
                   foreach ($script in @('Launch-NVIDIA.ps1','Apply-NVIDIA-Preset.ps1')) {
                       $tokens = $null; $errors = $null
                       [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $extracted $script), [ref]$tokens, [ref]$errors)
