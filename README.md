@@ -10,6 +10,8 @@ A workflow-only repository for building the latest public upstream Windows x64 l
 
 | Upstream / 原仓库 | Notes / 说明 |
 | --- | --- |
+| [stellarr-studio/kelvaroq](https://github.com/stellarr-studio/kelvaroq) | Full official portable layout: GUI/CLI, patched native backend, embedded Python/reference runtime and notices. / 完整便携包，包含图形界面、命令行、配套后端及运行库。 |
+| [LooperSalty/AnyXboxX](https://github.com/LooperSalty/AnyXboxX) | Optimized GUI + CLI + exact vendored VIctory; official Windows/NVIDIA profile and offline shader/pipeline script. / GUI、CLI及配套后端，使用上游NVIDIA预设，附离线预编译脚本；diagnostics为上游必需特性。 |
 | [carlm125/cool_fox](https://github.com/carlm125/cool_fox) | Optimized Release with its exact upstream RTX pareto-residency / Series S preset; includes shader and recorded-pipeline precompile scripts. / 最高优化编译，使用上游RTX性能预设，附着色器及已记录管线的一键预编译。 |
 | [avatarmanz/VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX) | Added from PortWatch's public race; uses the exact source's official fast launch preset. AMD tuning; 64 GB RAM recommended upstream. / 新增榜单项目，提取官方性能启动预设，主要针对AMD。 |
 | [DexNom/VIctory](https://github.com/DexNom/VIctory) | Added from PortWatch's public race; verifies format tables, builds all three executables. Default BAT uses the README no-RT path. / 新增榜单项目，含三个程序及格式表校验，默认关闭光追。 |
@@ -32,9 +34,9 @@ The public, active main-race repositories in the PortWatch data checked on **202
 4. Select **all** for one combined batch, or a single upstream. Choose the CPU target, then start. / 选择全部或单个项目，选择CPU指令集后开始。
 5. Wait for the selected builds and the final **Publish one combined Release / 统一发布** job. Open **Releases** in your own Fork and download the desired ZIP. / 等待编译和统一发布完成，到自己Fork的 **Releases** 下载所需ZIP。
 
-The upstream default-branch HEAD is resolved at build time and checked out by its exact full SHA. The upstream Rust toolchain and Cargo.lock are respected. Upstream changes do not trigger automatic builds: manually run again whenever you want an update.
+The upstream default-branch HEAD is resolved at build time and checked out by its exact full SHA. The upstream Rust toolchain and Cargo.lock are respected. Dependencies intentionally pinned or vendored by a project remain pinned/vendored: Kelvaroq builds its prescribed VIctory revision plus its ordered patches, and AnyXboxX builds its included third_party/victory, not an unrelated fork HEAD. Upstream changes do not trigger automatic builds: manually run again whenever you want an update.
 
-每个项目在构建时解析上游默认分支HEAD，并按完整SHA精确检出，使用上游指定的Rust工具链及Cargo.lock。想更新时再次手动触发即可，上游更新不会自动消耗编译额度。
+每个项目在构建时解析上游默认分支HEAD，并按完整SHA精确检出，使用上游指定的Rust工具链及Cargo.lock。项目有意固定或内置的依赖不会擅自升级：Kelvaroq使用其指定的VIctory提交及补丁，AnyXboxX使用自己的内置VIctory；两者后端详情写入清单和包内构建记录。想更新时再次手动触发即可，上游更新不会自动消耗编译额度。
 
 Build jobs have `contents: read`; only the final publisher has `contents: write`. Account or organization Actions policies must permit these workflows. No personal token or additional secret is required in a normal Fork.
 
@@ -42,9 +44,9 @@ Build jobs have `contents: read`; only the final publisher has `contents: write`
 
 ## Compiler optimization / 编译优化
 
-Every successful package uses **Release, opt-level=3, fat LTO, codegen-units=1, static MSVC CRT**, with incremental compilation and the diagnostics feature disabled. Line-table debug information is retained for crash analysis. The actual Rust version, flags and profile are saved in `BUILD-INFO.json`, project metadata and the unified manifest.
+Every successful package uses **Release, opt-level=3, fat LTO, codegen-units=1, static MSVC CRT**, with incremental compilation disabled. Diagnostics is disabled except for **AnyXboxX**, whose current source explicitly requires that feature to compile (including queue::presented gating); it remains an optimized release-profile build, not the separate diag profile. Its upstream measured light-DRED setting is retained. Line-table debug information is retained for crash analysis. Kelvaroq's official packagers set encoded rustflags; the build adapter appends the CPU/static-CRT flags while preserving their reproducible path flags, recording both native and frontend invocations in COMPILER-RECEIPT.json. Included non-Rust dependencies retain their own runtime requirements. The actual Rust version, flags and profile are saved in `BUILD-INFO.json`, project metadata and the unified manifest.
 
-所有项目使用 **Release、最高常规优化等级3、fat LTO、单代码生成单元和静态CRT**，关闭增量编译和diagnostics特性，保留便于定位崩溃的行号调试信息。实际参数和Rust版本记录在构建信息及清单中。
+所有项目使用 **Release、最高常规优化等级3、fat LTO、单代码生成单元和静态CRT**，关闭增量编译。除 **AnyXboxX** 当前源码因条件编译依赖必须保留diagnostics特性外，其他项目关闭该特性；AnyXboxX仍使用优化Release而非diag配置，保留上游实测预设中的轻量DRED。保留便于定位崩溃的行号调试信息。实际参数和Rust版本记录在构建信息及清单中。
 
 - **x86-64-v3 (default):** optimized for modern CPUs with AVX2, FMA, BMI/BMI2 and related v3 instructions. / 默认适合支持这些指令的现代Intel/AMD处理器。
 - **x86-64:** the CPU compatibility option for older machines. / 旧CPU使用兼容选项。
@@ -73,9 +75,9 @@ Full SHAs remain in `BUILD-MANIFEST.json` and uniquely named per-project metadat
 
 ## Extract and run / 解压使用
 
-Extract the entire ZIP into a writable folder. Its layout is **original-owner/original-repository/**. Run **Launch.bat** inside that folder or drag the game's EXE onto it. VIctory asks for the game executable; XCL opens its own game picker. Saves and caches use `data/` and `cache/` beside the launcher.
+Extract the entire ZIP into a writable folder. Its layout is **original-owner/original-repository/**. Run **Launch.bat** inside that folder or drag the game's EXE onto it. VIctory asks for the game executable; XCL opens its own game picker. VIctory saves and caches normally use `data/` and `cache/` beside the launcher. GUI projects can also store settings in AppData according to upstream; portable here means ready to extract/run without building, not that every setting stays in the ZIP folder.
 
-完整解压到可写目录，在 **原作者/仓库名/** 内运行 **Launch.bat**，或将游戏主程序拖到BAT。存档和缓存位于启动器旁的 `data/`、`cache/` 中。
+完整解压到可写目录，在 **原作者/仓库名/** 内运行 **Launch.bat**，或将游戏主程序拖到BAT。VIctory存档和缓存一般位于旁边的 `data/`、`cache/`；GUI项目还可能按上游设计写入AppData。“便携”指解压可用、无需自己编译，不代表所有用户设置都在解压目录。
 
 Packages include the executable, BAT, upstream README/license notices, exact `source.zip`, `BUILD-INFO.json` and file checksums. Projects with runtime presets also include `PERFORMANCE.md` and `RUNTIME-PRESET.json`; `Launch.bat --print-runtime-preset` prints the applied settings without starting the game. Runtime variables take effect when launching, not merely while compiling.
 
@@ -92,7 +94,7 @@ No Rust or full Windows SDK is required to use the packages. You still need the 
 
 ## Attribution / 致谢
 
-All launcher code belongs to its original authors and retains its upstream license. VIctory variants use GPL-3.0-or-later; XCL uses GPL-2.0-only. Microsoft runtime files retain their notices. PortWatch rankings and author reports help choose projects; they are not a performance guarantee by this builder.
+All launcher code belongs to its original authors and retains its upstream license. VIctory variants and Kelvaroq use GPL-3.0-or-later; Kelvaroq also retains separate licenses/source notices for its reference CPU and embedded dependencies. XCL uses GPL-2.0-only. AnyXboxX preserves its own and its vendored backend notices. Microsoft runtime files retain their notices. PortWatch rankings and author reports help choose projects; they are not a performance guarantee by this builder.
 
 所有启动器代码属于原作者并遵循上游许可证，微软运行库保留独立声明。榜单与作者实测用于选项目，不代表本编译仓库保证相同帧率或稳定性。
 
@@ -107,3 +109,13 @@ GPU pipelines require state recorded during actual gameplay: if none exists, lau
 GPU管线需要游戏实际记录：首次提示没有记录时，先用 **Record-Pipelines.bat** 进入所需场景并正常退出，再执行预编译。正常 Launch.bat 不强制增加管线记录开销。不要使用他人游戏衍生缓存。更换驱动或翻译器后可再次执行；无法提前生成从未记录的管线，不能修复未支持的着色器或保证30帧。上游AMD基线建议64GB内存，RTX预设也不代表所有场景都能在32GB内存下正常运行。
 
 Optional / 可选: `Precompile-Shaders.bat -Jobs 20 -PipelineJobs 4`, `-SkipPipelines`, or `-DryRun -NoPause` (validation only, no cache changes). No game assets or GPU-specific caches are built or published by CI.
+
+## Kelvaroq and AnyXboxX / 新增完整启动器包
+
+**Kelvaroq:** keep the entire `stellarr-studio/kelvaroq/` directory. `Launch.bat` opens the official GUI; select your game folder and use its automatic hardware profile. Dropping a game path on the BAT invokes `kelvaroq-cli.exe play`. The official portable packager supplies the native engine, SIMD DLL, embedded Python/Capstone/Unicorn reference runtime, notices and exact patched backend sources. It also runs its isolated package smoke tests. Windows .NET Framework 4.8 and compatible drivers/hardware are still required. Do not force `--experimental-render`: upstream does not show that it is faster. Shader/pipeline preloading is integrated into native play, which then opens the game; no standalone frontend precompile command is invented here. The manifest distinguishes the frontend SHA from the upstream-prescribed backend SHA and patched tree.
+
+**Kelvaroq：** 完整保留 `stellarr-studio/kelvaroq/` 中所有文件，双击 `Launch.bat` 打开官方GUI选择游戏目录，默认使用硬件自动预设；拖入游戏路径则走CLI。后端、SIMD库、内嵌Python及依赖都已打包，无需自行装Rust/Python；仍需Windows .NET Framework 4.8和兼容驱动。使用上游固定后端及补丁，不强制未证实更快的experimental-render。预加载集成在正式启动流程中，完成后会进入游戏，不冒充纯离线预编译。构建记录区分前端提交、后端提交和补丁后的源码树。
+
+**AnyXboxX:** keep all of `LooperSalty/AnyXboxX/`. `Launch.bat` asks for the game EXE/folder (or accepts a dropped path) and uses the upstream Windows/NVIDIA tuned profile with the included `victory.exe` through `--victory-exe`; no Cargo invocation or source checkout is needed at runtime. `Open-GUI.bat` optionally opens the included graphical launcher with that same prebuilt backend. The GUI can keep its own settings in AppData. **Current upstream compatibility caveat:** the frontends' `--warm`/`--precompile`/GUI-preload wrappers still pass archive paths to `victory warm`, whereas their included backend now uses `shaders <paths>` for translation and `warm` without paths for recorded GPU pipelines. We do not silently modify upstream runtime sources to hide this mismatch. Use the packaged **Precompile-Shaders.bat**, then **Launch.bat**, instead of those older warm wrappers. The standalone script uses the exact source's NVIDIA environment, logical-CPU/free-memory-aware concurrency, local cache and logs; it does **not** start the game. `Record-Pipelines.bat` starts the game only when you need to collect missing scene states. These scripts use the same options and limitations described below for cool_fox. They enumerate shaders.rpf and the game EXE; shaders in other optional DLLs are not claimed as precompiled.
+
+**AnyXboxX：** 包内包含CLI、GUI及同版本内置后端。用 `Launch.bat` 输入/拖入游戏EXE或目录，直接使用官方Windows/NVIDIA性能预设，不在本机重新编译；可选 `Open-GUI.bat` 打开GUI。**当前上游前端预热封装与内置后端CLI有参数不匹配**，可能导致GUI预热步骤失败；请用本包的 **Precompile-Shaders.bat** 纯离线预编译，再用 **Launch.bat** 启动。脚本与启动预设和缓存一致，按CPU/可用内存控制并发，保留日志；只遍历shaders.rpf和游戏EXE，不声称处理其他可选DLL。缺少GPU管线历史时才用 `Record-Pipelines.bat` 玩相应场景并正常退出。源码因条件编译要求保留diagnostics特性，但编译优化不降级、不会偷偷替换别的后端。

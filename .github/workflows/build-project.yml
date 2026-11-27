@@ -42,7 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX', 'carlm125/cool_fox')
+          $allowed = @('Marvisak/VIctory', 'xcl-dev/xcl', 'fxceless/victory-fork', 'Zettrox/ztrx', 'uiliannn/VItoriaBr', 'Belobug/VIctory-Belobug-AMD', 'DexNom/VIctory', 'avatarmanz/VIctory-7900XTX', 'carlm125/cool_fox', 'stellarr-studio/kelvaroq', 'LooperSalty/AnyXboxX')
           if ($env:UPSTREAM -cnotin $allowed) { throw 'Unsupported upstream repository.' }
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
           if ($env:CPU_TARGET -cnotin @('x86-64-v3', 'x86-64')) { throw 'Unsupported CPU target.' }
@@ -109,10 +109,84 @@ jobs:
               if (-not $?) { throw 'DexNom format table initialization failed.' }
           }
           $compileStarted = [DateTime]::UtcNow.ToString('o')
-          $buildArgs = @('build', '--release', '--locked', '--package', $package, '--target', 'x86_64-pc-windows-msvc')
-          if ($env:UPSTREAM -ceq 'DexNom/VIctory') { $buildArgs += '--bins' } else { $buildArgs += @('--bin', $package) }
-          cargo @buildArgs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:UPSTREAM -ceq 'stellarr-studio/kelvaroq') {
+              # Preserve the official native patches, portable dependencies and reproducible path flags.
+              $adapter = @'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = Path.cwd()
+          cpu = os.environ['CPU_TARGET']
+          if cpu not in ('x86-64-v3', 'x86-64'):
+              raise ValueError('Unsupported CPU target')
+          original_run = subprocess.run
+          events = []
+          installed = {'stable'}
+
+          def optimized_run(args, *positional, **kwargs):
+              argv = list(map(str, args)) if not isinstance(args, str) else []
+              if argv and Path(argv[0]).stem.lower() == 'cargo' and 'build' in argv:
+                  channel = next((a[1:] for a in argv if a.startswith('+')), 'stable')
+                  if channel not in installed:
+                      original_run(['rustup', 'toolchain', 'install', channel, '--profile', 'minimal', '--target', 'x86_64-pc-windows-msvc'], check=True)
+                      installed.add(channel)
+                  env = dict(kwargs.get('env', os.environ))
+                  flags = env.get('CARGO_ENCODED_RUSTFLAGS', '').split('\x1f')
+                  flags = [f for f in flags if f]
+                  flags += ['-Ctarget-feature=+crt-static', '-Ctarget-cpu=' + cpu]
+                  env['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(flags)
+                  kwargs['env'] = env
+                  event = dict(command=argv, rust_toolchain=channel, encoded_rustflags=flags,
+                               release_env={k: env[k] for k in ('CARGO_PROFILE_RELEASE_OPT_LEVEL', 'CARGO_PROFILE_RELEASE_LTO', 'CARGO_PROFILE_RELEASE_CODEGEN_UNITS')})
+                  print('Optimized upstream build:', json.dumps(event), flush=True)
+                  result = original_run(args, *positional, **kwargs)
+                  events.append(event)
+                  return result
+              return original_run(args, *positional, **kwargs)
+
+          def load(name):
+              spec = importlib.util.spec_from_file_location(name, root / 'scripts' / (name + '.py'))
+              module = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(module)
+              return module
+
+          subprocess.run = optimized_run
+          native = load('build_native')
+          receipt = native.run(native.UPSTREAM, native.OUTPUT.resolve())
+          portable = load('package_windows')
+          portable.main()  # Builds frontends, assembles pinned inputs and runs upstream isolated smoke tests.
+          archives = list((root / 'target/dist').glob('Kelvaroq-*-windows-x64.zip'))
+          if len(events) != 2 or len(archives) != 1:
+              raise ValueError('Expected native + frontend builds and one verified portable archive')
+          (root / '.builder-kelvaroq.json').write_text(json.dumps(dict(
+              archive=str(archives[0].relative_to(root)), native=receipt, builds=events), indent=2), encoding='utf-8')
+          '@
+              $scriptPath = Join-Path $env:RUNNER_TEMP 'build-kelvaroq.py'
+              [IO.File]::WriteAllText($scriptPath, $adapter, [Text.UTF8Encoding]::new($false))
+              python $scriptPath
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } elseif ($env:UPSTREAM -ceq 'LooperSalty/AnyXboxX') {
+              cargo build --release --locked --target x86_64-pc-windows-msvc --package anyxboxx --package anyxboxx-launcher --bins
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              Push-Location -LiteralPath 'third_party/victory'
+              try {
+                  rustup show
+                  if ($LASTEXITCODE -ne 0) { throw 'Vendored backend toolchain installation failed.' }
+                  # This exact upstream needs diagnostics to compile; do not patch it away.
+                  cargo build --release --locked --target x86_64-pc-windows-msvc --package victory --bin victory --features diagnostics
+                  if ($LASTEXITCODE -ne 0) { throw 'AnyXboxX vendored backend build failed.' }
+                  $backendRust = (& rustc --version | Out-String).Trim()
+              } finally { Pop-Location }
+              [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE '.builder-anyxboxx-rust.txt'), $backendRust)
+          } else {
+              $buildArgs = @('build', '--release', '--locked', '--package', $package, '--target', 'x86_64-pc-windows-msvc')
+              if ($env:UPSTREAM -ceq 'DexNom/VIctory') { $buildArgs += '--bins' } else { $buildArgs += @('--bin', $package) }
+              cargo @buildArgs
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           "started_utc=$compileStarted" >> $env:GITHUB_OUTPUT
           "completed_utc=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_OUTPUT
 
@@ -143,9 +217,40 @@ jobs:
           [System.IO.Directory]::CreateDirectory($root) | Out-Null
           [System.IO.Directory]::CreateDirectory($dist) | Out-Null
           $isXcl = $repo -eq 'xcl-dev/xcl'
-          $binaryName = if ($isXcl) { 'xcl.exe' } else { 'victory.exe' }
-          $binary = Join-Path $env:CARGO_TARGET_DIR "x86_64-pc-windows-msvc/release/$binaryName"
-          Copy-Item -LiteralPath $binary -Destination $root
+          $isKelvaroq = $repo -ceq 'stellarr-studio/kelvaroq'
+          $isAnyXboxX = $repo -ceq 'LooperSalty/AnyXboxX'
+          $binaryName = if ($isXcl) { 'xcl.exe' } elseif ($isKelvaroq) { 'kelvaroq-cli.exe' } elseif ($isAnyXboxX) { 'anyxboxx.exe' } else { 'victory.exe' }
+          $backend = $null
+          $kelvaroqBuild = $null
+          if ($isKelvaroq) {
+              $kelvaroqBuild = Get-Content -LiteralPath '.builder-kelvaroq.json' -Raw | ConvertFrom-Json
+              Expand-Archive -LiteralPath $kelvaroqBuild.archive -DestinationPath $root
+              Copy-Item -LiteralPath '.builder-kelvaroq.json' -Destination (Join-Path $root 'COMPILER-RECEIPT.json')
+              $backend = [ordered]@{
+                  upstream = $kelvaroqBuild.native.upstream; source_sha = $kelvaroqBuild.native.revision
+                  patched_tree = $kelvaroqBuild.native.patched_tree; rust_version = $kelvaroqBuild.native.rust
+                  receipt = 'native/build.json'; source_archive = 'sources/native.zip'
+              }
+          } else {
+              $binary = Join-Path $env:CARGO_TARGET_DIR "x86_64-pc-windows-msvc/release/$binaryName"
+              Copy-Item -LiteralPath $binary -Destination $root
+          }
+          if ($isAnyXboxX) {
+              foreach ($extra in @('anyxboxx-launcher.exe', 'victory.exe')) {
+                  Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR "x86_64-pc-windows-msvc/release/$extra") -Destination $root
+              }
+              $backendTree = (& git rev-parse "${sha}:third_party/victory" | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0 -or $backendTree -notmatch '^[0-9a-f]{40}$') { throw 'Invalid vendored backend tree.' }
+              $backend = [ordered]@{
+                  upstream = $repo; source_path = 'third_party/victory'; source_tree = $backendTree
+                  rust_version = (Get-Content -LiteralPath '.builder-anyxboxx-rust.txt' -Raw).Trim()
+                  source_archive = 'source.zip'; diagnostics = $true
+              }
+              Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse
+              Copy-Item -LiteralPath 'third_party/victory/LICENSE' -Destination (Join-Path $root 'LICENSE-victory')
+              & (Join-Path $root 'victory.exe') --help
+              if ($LASTEXITCODE -ne 0) { throw 'Vendored backend --help failed.' }
+          }
           if ($repo -ceq 'DexNom/VIctory') {
               foreach ($extra in @('victory-play.exe', 'victory-warm.exe')) {
                   Copy-Item -LiteralPath (Join-Path (Split-Path $binary -Parent) $extra) -Destination $root
@@ -254,6 +359,30 @@ jobs:
               }
               Copy-Item -LiteralPath $playPath -Destination (Join-Path $root 'Play-VIctory.upstream.cmd')
               if (Test-Path -LiteralPath 'docs') { Copy-Item -LiteralPath 'docs' -Destination (Join-Path $root 'docs') -Recurse }
+          } elseif ($isAnyXboxX) {
+              # Read only literal Rust tuples; reject changed syntax rather than running arbitrary scripts.
+              $settingsPath = 'crates/anyxboxx/src/run/settings.rs'
+              $settings = Get-Content -LiteralPath $settingsPath -Raw
+              foreach ($table in @('ALWAYS', 'TUNED')) {
+                  $match = [regex]::Match($settings, ('(?s)pub const ' + $table + ':.*?= &\[(?<body>.*?)\];'))
+                  if (-not $match.Success) { throw 'AnyXboxX settings format changed.' }
+                  $body = [regex]::Replace($match.Groups['body'].Value, '(?m)//[^\r\n]*', '')
+                  $tuple = '\(\s*"(VICTORY_[A-Z0-9_]+)"\s*,\s*"([A-Za-z0-9_.,+-]+)"\s*,?\s*\)'
+                  foreach ($entry in [regex]::Matches($body, $tuple)) {
+                      $runtimeEnv[$entry.Groups[1].Value] = $entry.Groups[2].Value
+                  }
+                  if ([regex]::Replace([regex]::Replace($body, $tuple, ''), '[\s,]', '') -cne '') { throw 'Unrecognized upstream runtime expressions.' }
+              }
+              if ($runtimeEnv.Count -lt 25 -or $runtimeEnv['VICTORY_D3D12_DRED'] -cne 'light') { throw 'Incomplete AnyXboxX NVIDIA preset.' }
+              $runtimePreset = [ordered]@{
+                  name = 'anyxboxx-upstream-windows-nvidia'; kind = 'runtime-environment'; compile_profile = 'release'
+                  basis = 'Exact source anyxboxx run Windows/NVIDIA defaults, retaining upstream-required diagnostics and light DRED'
+                  reference_sha = $sha; readme = "https://github.com/$repo/blob/$sha/$settingsPath"
+                  diagnostics_readme = "https://github.com/$repo/blob/$sha/Cargo.toml"
+                  reported_hardware = 'Upstream measured RTX 4070 SUPER and i7-13700KF; Series X, warm cache'
+                  reported_fps = 'Source comments report about 20 FPS median in world; this package has not been gameplay benchmarked'
+              }
+              Copy-Item -LiteralPath $settingsPath -Destination (Join-Path $root 'settings.upstream.rs')
           } elseif ($repo -ceq 'DexNom/VIctory') {
               $runtimeEnv = [ordered]@{ VICTORY_RAY_TRACING = '0' }
               $runtimePreset = [ordered]@{
@@ -267,14 +396,17 @@ jobs:
           }
           if ($null -ne $runtimePreset) {
               $clearEnv = @('VICTORY_GPU_TIMING', 'VICTORY_D3D12_DRED', 'VICTORY_D3D12_DEBUG', 'VICTORY_D3D12_GBV', 'VICTORY_D3D12_WARP', 'VICTORY_PROFILE', 'VICTORY_BACK_READS', 'VICTORY_WAVE_WIDE')
+              if ($isAnyXboxX) { $clearEnv = @($clearEnv | Where-Object { $_ -cne 'VICTORY_D3D12_DRED' }); $clearEnv += @('VICTORY_HOST_WAVE', 'VICTORY_HOST_MAX_WAVE', 'VICTORY_VIEW_LIMIT', 'VICTORY_WARM_SECONDS') }
               $runtimePreset.compiled_source_readme = "https://github.com/$repo/blob/$sha/README.md"
               $runtimePreset.environment = $runtimeEnv; $runtimePreset.clear_environment = $clearEnv
               $console = if ($repo -ceq 'carlm125/cool_fox') { 'series-s' } else { 'series-x' }
               if ($repo -ceq 'carlm125/cool_fox') { $clearEnv += @('VICTORY_HOST_WAVE', 'VICTORY_HOST_MAX_WAVE', 'VICTORY_VIEW_LIMIT', 'VICTORY_WARM_SECONDS') }
               $runtimePreset.clear_environment = $clearEnv
-              $runtimePreset.extra_arguments = @('--console', $console); $runtimePreset.gameplay_tested = $false
+              $runtimePreset.extra_arguments = @()
+              if (-not $isAnyXboxX) { $runtimePreset.extra_arguments = @('--console', $console) }
+              $runtimePreset.gameplay_tested = $false
               foreach ($entry in $runtimeEnv.GetEnumerator()) {
-                  if ($entry.Key -notmatch '^VICTORY_[A-Z0-9_]+$' -or $entry.Value -notmatch '^[A-Za-z0-9_.+-]+$') { throw 'Unsafe runtime preset literal.' }
+                  if ($entry.Key -notmatch '^VICTORY_[A-Z0-9_]+$' -or $entry.Value -notmatch '^[A-Za-z0-9_.,+-]+$') { throw 'Unsafe runtime preset literal.' }
               }
               $commands = @('rem Upstream runtime performance preset; see PERFORMANCE.md.')
               $commands += @($runtimeEnv.GetEnumerator() | ForEach-Object { 'set "' + $_.Key + '=' + $_.Value + '"' })
@@ -287,7 +419,7 @@ jobs:
                   ''
                   'Use Launch.bat, or drag the game EXE onto it, to apply these runtime settings before the game starts.'
                   '通过 Launch.bat 启动或将游戏 EXE 拖到它上面，才能应用运行参数；单独运行 victory.exe 不会自动应用。'
-                  'Optimized Release: opt-level=3, fat LTO, one codegen unit, static CRT; no diagnostics feature.'
+                  ('Optimized Release: opt-level=3, fat LTO, one codegen unit, static Rust CRT; diagnostics: ' + $(if ($isAnyXboxX) { 'required by upstream' } else { 'off' }))
                   ('CPU target / CPU 指令集: ' + $env:CPU_TARGET)
                   ('Basis / 来源: ' + $runtimePreset.basis)
                   ('Reference / 参数文档: ' + $runtimePreset.readme)
@@ -341,12 +473,96 @@ jobs:
           popd
           exit /b %RESULT%
           '@
+          if ($isKelvaroq) {
+              $launcher = @'
+          @echo off
+          setlocal EnableExtensions DisableDelayedExpansion
+          pushd "%~dp0" >nul 2>&1
+          if errorlevel 1 exit /b 1
+          if /i "%~1"=="--check-package" (
+              if not exist "%~dp0Kelvaroq.exe" exit /b 1
+              if not exist "%~dp0native\kelvaroq-engine.exe" exit /b 1
+              if not exist "%~dp0runtime\python.exe" exit /b 1
+              echo GUI: "%~dp0Kelvaroq.exe"
+              echo CLI: "%~dp0kelvaroq-cli.exe" play GAME_EXE_OR_FOLDER
+              popd
+              exit /b 0
+          )
+          if "%~1"=="" (
+              start "" /wait "%~dp0Kelvaroq.exe"
+              goto :finish
+          )
+          if not exist "%~1" (
+              echo [ERROR] Game file or folder not found.
+              popd
+              exit /b 1
+          )
+          "%~dp0kelvaroq-cli.exe" play "%~1"
+          :finish
+          set "RESULT=%ERRORLEVEL%"
+          popd
+          exit /b %RESULT%
+          '@
+          } elseif ($isAnyXboxX) {
+              # Use the upstream CLI profile. Its current GUI warm wrapper still uses an older backend syntax.
+              $launcher = @'
+          @echo off
+          setlocal EnableExtensions DisableDelayedExpansion
+          pushd "%~dp0" >nul 2>&1
+          if errorlevel 1 exit /b 1
+          set "VICTORY_CACHE_DIR=%~dp0cache"
+          set "VICTORY_DATA_DIR=%~dp0data"
+          rem PROJECT_RUNTIME_PRESET
+          if /i "%~1"=="--check-package" (
+              if not exist "%~dp0anyxboxx-launcher.exe" exit /b 1
+              if not exist "%~dp0victory.exe" exit /b 1
+              echo CLI: "%~dp0anyxboxx.exe" run --game-dir GAME_FOLDER --victory-exe "%~dp0victory.exe" --profile windows-nvidia
+              popd
+              exit /b 0
+          )
+          set "GAME=%~1"
+          if not defined GAME set /p "GAME=Enter the full game EXE path or game folder: "
+          set "GAME=%GAME:"=%"
+          if exist "%GAME%\game_scarlett_master.exe" (
+              for %%I in ("%GAME%") do set "GAME_DIR=%%~fI\."
+          ) else (
+              for %%I in ("%GAME%") do set "GAME_DIR=%%~dpI."
+          )
+          if not exist "%GAME_DIR%\game_scarlett_master.exe" (
+              echo [ERROR] game_scarlett_master.exe not found in the selected folder.
+              pause
+              popd
+              exit /b 1
+          )
+          "%~dp0anyxboxx.exe" run --game-dir "%GAME_DIR%" --victory-exe "%~dp0victory.exe" --profile windows-nvidia
+          set "RESULT=%ERRORLEVEL%"
+          echo Launcher exited with code %RESULT%.
+          pause
+          popd
+          exit /b %RESULT%
+          '@
+              $gui = @'
+          @echo off
+          setlocal EnableExtensions DisableDelayedExpansion
+          pushd "%~dp0" >nul 2>&1
+          if errorlevel 1 exit /b 1
+          set "VICTORY_CACHE_DIR=%~dp0cache"
+          set "VICTORY_DATA_DIR=%~dp0data"
+          echo This upstream GUI currently sends archive paths to the backend warm command.
+          echo If its shader stage fails, use Precompile-Shaders.bat then Launch.bat instead.
+          start "" /wait "%~dp0anyxboxx-launcher.exe" --victory-exe "%~dp0victory.exe"
+          set "RESULT=%ERRORLEVEL%"
+          popd
+          exit /b %RESULT%
+          '@
+              [IO.File]::WriteAllText((Join-Path $root 'Open-GUI.bat'), (($gui -replace '\r?\n', [Environment]::NewLine) + [Environment]::NewLine), [Text.Encoding]::ASCII)
+          }
           $launcher = $launcher.Replace('rem PROJECT_RUNTIME_PRESET', $presetCommands)
           if ($null -ne $runtimePreset) {
               $launcher = $launcher.Replace('victory.exe" run "%GAME%" --execute', ('victory.exe" run "%GAME%" --execute ' + ($runtimePreset.extra_arguments -join ' ')))
           }
           [System.IO.File]::WriteAllText((Join-Path $root 'Launch.bat'), (($launcher -replace '\r?\n', [Environment]::NewLine) + [Environment]::NewLine), [System.Text.Encoding]::ASCII)
-          if ($repo -ceq 'carlm125/cool_fox') {
+          if ($repo -cin @('carlm125/cool_fox', 'LooperSalty/AnyXboxX')) {
               $precompileScript = @'
           [CmdletBinding()]
           param(
@@ -407,7 +623,7 @@ jobs:
               $env:VICTORY_CACHE_DIR = Join-Path $root 'cache'
               $env:VICTORY_DATA_DIR = Join-Path $root 'data'
               $env:VICTORY_WARM_SECONDS = $null
-              Say '=== cool_fox shader and pipeline precompile / 着色器与管线预编译 ==='
+              Say '=== Shader and pipeline precompile / 着色器与管线预编译 ==='
               Say ('Preset / 预设: ' + $preset.name)
               Say ('Cache / 缓存: ' + $env:VICTORY_CACHE_DIR)
               Say 'GPU capabilities are detected by victory.exe, not hardcoded. / 程序自动探测真实显卡。'
@@ -428,7 +644,7 @@ jobs:
               if (-not $DryRun) {
                   $hash = [Security.Cryptography.SHA256]::Create()
                   try { $id = [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant()))).Replace('-','') } finally { $hash.Dispose() }
-                  $mutex = [Threading.Mutex]::new($false, ('Local\CoolFoxShaderWarmup_' + $id))
+                  $mutex = [Threading.Mutex]::new($false, ('Local\LauncherShaderWarmup_' + $id))
                   try { $owns = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owns = $true }
                   if (-not $owns) { throw 'Another precompile script is already running in this folder.' }
                   if (@(ActiveTitle).Count -gt 0) {
@@ -538,6 +754,43 @@ jobs:
               $instructions += [Environment]::NewLine + 'cool_fox: Launch.bat uses the upstream pareto-residency / Series S preset. Run Precompile-Shaders.bat to translate shaders, then warm all recorded GPU pipelines. If no pipeline history exists, use Record-Pipelines.bat once and rerun precompile. Keep both precompile files beside victory.exe. See PERFORMANCE.md and the builder README for memory requirements and limitations.'
               [IO.File]::AppendAllText((Join-Path $root 'PERFORMANCE.md'), ([Environment]::NewLine + 'Shader warmup / 着色器预编译: Precompile-Shaders.bat. Pipeline collection / 管线记录: Record-Pipelines.bat (optional; normal launches do not force recording). Actual GPU capabilities are auto-detected; local caches are never included in releases. 首次没有管线历史时，先记录游戏场景再预热，不能凭空生成全部GPU管线。'), $utf8)
           }
+          if ($isKelvaroq) {
+              $instructions = @'
+          Extract ALL files; keep native/, runtime/, sources/ and notices/ beside Kelvaroq.exe.
+          Launch.bat opens the official GUI. Select the game folder there and use its hardware auto-profile.
+          Alternatively drag the game EXE or folder onto Launch.bat to use kelvaroq-cli.exe play.
+          The optimized native backend is included; no separate Rust/Python install is needed.
+          Windows .NET Framework 4.8, D3D12-capable hardware and supported drivers are still required.
+          No experimental-render flag is forced: upstream does not establish that it is faster.
+          Shader/pipeline preloading is integrated into native play; it is not a standalone all-pipelines CLI.
+          GUI settings may be stored in AppData/Kelvaroq, as designed upstream; not all user data is portable.
+          native/build.json records the upstream-PINNED engine SHA, patched tree and patch hashes.
+          sources/native.zip is that exact patched backend; source.zip is the Kelvaroq frontend source.
+          COMPILER-RECEIPT.json records effective CPU/static-CRT flags, preserving upstream remap flags.
+          See README.md and notices/ for requirements, limitations and licenses. No game files are included.
+          '@
+          } elseif ($isAnyXboxX) {
+              $instructions += [Environment]::NewLine + @'
+
+          AnyXboxX portable package: anyxboxx.exe + anyxboxx-launcher.exe + vendored victory.exe.
+          Launch.bat prompts for the game EXE/folder (or accepts a dropped EXE) and calls the official
+          anyxboxx run --profile windows-nvidia --victory-exe BUNDLED_EXE command. No Rust, clone or build.
+          Precompile-Shaders.bat only precompiles shaders and already-recorded GPU pipelines; no game starts.
+          It uses the exact same upstream NVIDIA environment and local cache as Launch.bat.
+          The offline script enumerates shaders.rpf and the game EXE, not other optional DLLs; no SDK DLL is included.
+          Record-Pipelines.bat launches the game to collect states: play the desired scenes, then exit normally.
+          Current upstream mismatch: CLI --warm/--precompile and GUI shader preload pass archive paths to
+          victory warm, but this vendored backend reserves warm for recorded GPU pipelines (no path args).
+          Use this package's standalone Precompile-Shaders.bat plus Launch.bat instead of those older wrappers.
+          Open-GUI.bat is included for optional GUI use, with the prebuilt backend passed explicitly.
+          GUI settings may also be stored in AppData by upstream. The GUI is not smoke-tested by opening it.
+          Diagnostics is REQUIRED to compile this exact upstream (queue::presented gating); the build still
+          uses optimized Release / fat LTO / one codegen unit, not the separate diag profile. Light DRED
+          remains part of the official measured NVIDIA preset. We did not patch upstream runtime sources.
+          No FPS, rendering-correctness or crash-free guarantee. Read docs/ and PERFORMANCE.md.
+          '@
+              [IO.File]::AppendAllText((Join-Path $root 'PERFORMANCE.md'), ([Environment]::NewLine + 'AnyXboxX: diagnostics required upstream; light DRED retained. Precompile-Shaders.bat bypasses the obsolete warm-with-archive wrapper without launching the game. Use Record-Pipelines.bat only to collect missing gameplay pipeline states.'), $utf8)
+          }
           [System.IO.File]::WriteAllText((Join-Path $root 'START-HERE.txt'), $instructions, $utf8)
           & git archive --format=zip "--output=$(Join-Path $root 'source.zip')" HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
@@ -552,7 +805,7 @@ jobs:
               compiled_beijing = [DateTimeOffset]::Parse($env:COMPILED_UTC).ToOffset([TimeSpan]::FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss 'UTC+08:00'")
               built_utc = [DateTime]::UtcNow.ToString('o'); binary = $binaryName; binary_sha256 = $binaryHash
               profile = 'release'; target = 'x86_64-pc-windows-msvc'; crt = 'static'
-              optimization = [ordered]@{ opt_level = 3; lto = 'fat'; codegen_units = 1; cpu_target = $env:CPU_TARGET; diagnostics = $false; rustflags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS }
+              optimization = [ordered]@{ opt_level = 3; lto = 'fat'; codegen_units = 1; cpu_target = $env:CPU_TARGET; diagnostics = $isAnyXboxX; diagnostics_reason = $(if ($isAnyXboxX) { 'upstream-required' } else { $null }); rustflags = $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS }
               format_table_sha256 = $(if ($repo -ceq 'DexNom/VIctory') { (Get-FileHash -LiteralPath 'crates/victory-formats/src/bcpack-tables.bin' -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null })
               dxc = $(if ($isXcl) { 'v1.9.2609' } else { $null })
               agility = $(if ($isXcl) { '1.620.2' } else { $null })
@@ -560,10 +813,13 @@ jobs:
                   @{ url = 'https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip'; sha256 = 'ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1' }
                   @{ url = 'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/1.620.2/microsoft.direct3d.d3d12.1.620.2.nupkg'; sha256 = '70489669c2bbeaf318b62d72b0ac3e753d521387bfc848c9763791c4e920bfcc' }
               ) } else { @() })
-              shader_precompile = $(if ($repo -ceq 'carlm125/cool_fox') { [ordered]@{
+              shader_precompile = $(if ($repo -cin @('carlm125/cool_fox', 'LooperSalty/AnyXboxX')) { [ordered]@{
                   script = 'Precompile-Shaders.bat'; shader_command = 'shaders'; pipeline_command = 'warm'
                   automatic_gpu_detection = $true; runtime_preset = $runtimePreset.name; pipeline_recording = 'Record-Pipelines.bat'
               } } else { $null })
+              backend = $backend
+              entrypoint = 'Launch.bat'
+              compiler_receipt = $(if ($isKelvaroq) { $kelvaroqBuild.builds } else { $null })
               runtime_preset = $runtimePreset
               gameplay_tested = $false
           }
@@ -600,7 +856,7 @@ jobs:
               if ($packedPreset.name -cne $runtimePreset.name -or $packedPreset.reference_sha -cne $runtimePreset.reference_sha) { throw 'Packed runtime preset mismatch.' }
               Write-Host "Verified runtime preset: $($runtimePreset.name); $($runtimeEnv.Count) variables; $($runtimePreset.extra_arguments -join ' ')"
           }
-          if ($repo -ceq 'carlm125/cool_fox') {
+          if ($repo -cin @('carlm125/cool_fox', 'LooperSalty/AnyXboxX')) {
               foreach ($command in @('shaders', 'warm')) {
                   & (Join-Path $extracted $binaryName) $command --help
                   if ($LASTEXITCODE -ne 0) { throw "Upstream precompile command unavailable: $command" }
@@ -610,6 +866,16 @@ jobs:
               if ($scriptErrors.Count -ne 0) { throw ('Precompile script syntax error: ' + ($scriptErrors -join '; ')) }
               & (Join-Path $extracted 'Precompile-Shaders.bat') -DryRun -NoPause
               if ($LASTEXITCODE -ne 0) { throw 'Packaged precompile script dry-run failed.' }
+          }
+          if ($isKelvaroq -or $isAnyXboxX) {
+              Push-Location -LiteralPath $extracted
+              try {
+                  & cmd.exe /d /c 'Launch.bat --check-package'
+                  if ($LASTEXITCODE -ne 0) { throw 'Portable launcher package check failed.' }
+              } finally { Pop-Location }
+              $backendExe = if ($isKelvaroq) { 'native/kelvaroq-engine.exe' } else { 'victory.exe' }
+              & (Join-Path $extracted $backendExe) run --help
+              if ($LASTEXITCODE -ne 0) { throw 'Extracted backend run --help failed.' }
           }
           $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           [System.IO.File]::WriteAllText(($zip + '.sha256'), "$zipHash  $zipName", $utf8)
