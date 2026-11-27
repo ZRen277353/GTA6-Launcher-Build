@@ -117,6 +117,7 @@ jobs:
           import json
           import os
           from pathlib import Path
+          import shutil
           import subprocess
 
           root = Path.cwd()
@@ -161,12 +162,29 @@ jobs:
           native = load('build_native')
           receipt = native.run(native.UPSTREAM, native.OUTPUT.resolve())
           portable = load('package_windows')
+          original_release_build = portable.release_build
+          layout_fixes = []
+
+          def compatible_release_build():
+              release = original_release_build()
+              desktop = release / 'kelvaroq-desktop.exe'
+              if not desktop.is_file():
+                  # New Cargo adds a package/hash level under build/. Upstream's parents[2]
+                  # leaves this successfully compiled companion one directory too high.
+                  candidates = list((root / 'target/package-build').rglob('kelvaroq-desktop.exe'))
+                  if len(candidates) != 1:
+                      raise ValueError('Expected one official compiled desktop companion')
+                  shutil.copyfile(candidates[0], desktop)
+                  layout_fixes.append(dict(source=str(candidates[0].relative_to(root)), destination=str(desktop.relative_to(root))))
+              return release
+
+          portable.release_build = compatible_release_build
           portable.main()  # Builds frontends, assembles pinned inputs and runs upstream isolated smoke tests.
           archives = list((root / 'target/dist').glob('Kelvaroq-*-windows-x64.zip'))
           if len(events) != 2 or len(archives) != 1:
               raise ValueError('Expected native + frontend builds and one verified portable archive')
           (root / '.builder-kelvaroq.json').write_text(json.dumps(dict(
-              archive=str(archives[0].relative_to(root)), native=receipt, builds=events), indent=2), encoding='utf-8')
+              archive=str(archives[0].relative_to(root)), native=receipt, builds=events, layout_fixes=layout_fixes), indent=2), encoding='utf-8')
           '@
               $scriptPath = Join-Path $env:RUNNER_TEMP 'build-kelvaroq.py'
               [IO.File]::WriteAllText($scriptPath, $adapter, [Text.UTF8Encoding]::new($false))
