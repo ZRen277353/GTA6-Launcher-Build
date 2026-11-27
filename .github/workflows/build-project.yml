@@ -533,7 +533,7 @@ jobs:
           exit /b %RESULT%
           '@
           } elseif ($isAnyXboxX) {
-              # Use the upstream CLI profile. Its current GUI warm wrapper still uses an older backend syntax.
+              # Use the upstream CLI profile without requiring a local Cargo checkout.
               $launcher = @'
           @echo off
           setlocal EnableExtensions DisableDelayedExpansion
@@ -577,8 +577,8 @@ jobs:
           if errorlevel 1 exit /b 1
           set "VICTORY_CACHE_DIR=%~dp0cache"
           set "VICTORY_DATA_DIR=%~dp0data"
-          echo This upstream GUI currently sends archive paths to the backend warm command.
-          echo If its shader stage fails, use Precompile-Shaders.bat then Launch.bat instead.
+          echo Using the bundled backend; no local Rust build is required.
+          echo For full offline shader translation, run Precompile-Shaders.bat before playing.
           start "" /wait "%~dp0anyxboxx-launcher.exe" --victory-exe "%~dp0victory.exe"
           set "RESULT=%ERRORLEVEL%"
           popd
@@ -809,9 +809,11 @@ jobs:
           It uses the exact same upstream NVIDIA environment and local cache as Launch.bat.
           The offline script enumerates shaders.rpf and the game EXE, not other optional DLLs; no SDK DLL is included.
           Record-Pipelines.bat launches the game to collect states: play the desired scenes, then exit normally.
-          Current upstream mismatch: CLI --warm/--precompile and GUI shader preload pass archive paths to
-          victory warm, but this vendored backend reserves warm for recorded GPU pipelines (no path args).
-          Use this package's standalone Precompile-Shaders.bat plus Launch.bat instead of those older wrappers.
+          Shader-preload behavior follows the selected upstream source: recent revisions call plain
+          victory warm for recorded GPU pipelines, not full CPU translation of every game shader.
+          Some earlier frontend revisions passed unsupported archive arguments to warm.
+          For full offline translation followed by recorded-pipeline warmup, use Precompile-Shaders.bat.
+          This helper calls backend shaders/warm directly and never starts the game.
           Open-GUI.bat is included for optional GUI use, with the prebuilt backend passed explicitly.
           GUI settings may also be stored in AppData by upstream. The GUI is not smoke-tested by opening it.
           Diagnostics is REQUIRED to compile this exact upstream (queue::presented gating); the build still
@@ -819,7 +821,7 @@ jobs:
           remains part of the official measured NVIDIA preset. We did not patch upstream runtime sources.
           No FPS, rendering-correctness or crash-free guarantee. Read docs/ and PERFORMANCE.md.
           '@
-              [IO.File]::AppendAllText((Join-Path $root 'PERFORMANCE.md'), ([Environment]::NewLine + 'AnyXboxX: diagnostics required upstream; light DRED retained. Precompile-Shaders.bat bypasses the obsolete warm-with-archive wrapper without launching the game. Use Record-Pipelines.bat only to collect missing gameplay pipeline states.'), $utf8)
+              [IO.File]::AppendAllText((Join-Path $root 'PERFORMANCE.md'), ([Environment]::NewLine + 'AnyXboxX: diagnostics required upstream; light DRED retained. Precompile-Shaders.bat calls backend shaders then recorded-pipeline warm, independently of the selected frontend revision, without launching the game. Use Record-Pipelines.bat only to collect missing gameplay pipeline states.'), $utf8)
           }
           [System.IO.File]::WriteAllText((Join-Path $root 'START-HERE.txt'), $instructions, $utf8)
           & git archive --format=zip "--output=$(Join-Path $root 'source.zip')" HEAD
